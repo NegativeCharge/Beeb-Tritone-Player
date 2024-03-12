@@ -10,7 +10,7 @@ The track currently needs to be included at the bottom of main.6502 (samples are
 
 Tritone tracks can be composed in 1Tracker (https://shiru.untergrund.net/software.shtml) - you will need to export the track in Atari ca65 format, and manually convert to BeebAsm format (see samples for changes required).
 
-**NOTE:**
+**NOTE:+ This is currently in a barely working state and needs a lot of optimization**
 
 Release Notes:
 
