@@ -1,0 +1,312 @@
+    0080: A0 FF             LDY #$FF
+					.L17
+    0082: A2 FF             LDX #$FF
+    0084: 9A                TXS
+    0085: A2 00             LDX #$00
+    0087: 18                CLC
+					.L14
+    0088: A9 00             LDA #$00
+    008A: 69 00             ADC #$00
+    008C: 85 8B             STA $8B
+    008E: 8A                TXA
+    008F: 69 00             ADC #$00
+    0091: AA                TAX
+    0092: BD 00 E0          LDA $E000,X
+    0095: 8D 1F D0          STA CONSOL
+    0098: A9 00             LDA #$00
+    009A: 69 00             ADC #$00
+    009C: 85 9B             STA $9B
+    009E: A9 00             LDA #$00
+    00A0: 65 A5             ADC $A5
+    00A2: 85 A5             STA $A5
+    00A4: AD 00 E0          LDA $E000
+    00A7: 8D 1F D0          STA CONSOL
+    00AA: A9 00             LDA #$00
+    00AC: 69 00             ADC #$00
+    00AE: 85 AD             STA $AD
+    00B0: A9 00             LDA #$00
+    00B2: 65 B7             ADC $B7
+    00B4: 85 B7             STA $B7
+    00B6: AD 00 E0          LDA $E000
+    00B9: 8D 1F D0          STA CONSOL
+    00BC: 88                DEY
+    00BD: D0 C9             BNE L14
+    00BF: 28                PLP
+    00C0: D0 C6             BNE L14
+    00C2: 8C 1F D0          STY CONSOL
+    00C5: 86 86             STX $86
+    00C7: 4C F8 0C          JMP L11 
+	
+	0C00: 78                SEI
+    0C01: A0 00             LDY #$00
+    0C03: 8C 00 D4          STY DMACTL
+    0C06: 8C 0E D4          STY NMIEN
+    0C09: A9 FE             LDA #$FE
+    0C0B: 8D 01 D3          STA PORTB
+    0C0E: A0 00             LDY #$00
+    0C10: 98                TYA
+					.L3
+    0C11: 99 00 E0          STA $E000,Y				; Clear page from $E000 to $EFFF
+    0C14: C8                INY
+    0C15: D0 FA             BNE L3
+    0C17: A9 34             LDA #$34
+					.L4
+    0C19: 99 00 01          STA $0100,Y				; Set $0000 to $0100 as $34
+    0C1C: 88                DEY
+    0C1D: D0 FA             BNE L4
+    0C1F: 09 02             ORA #$02				; $34 ORA $02 = $36
+    0C21: 8D FF 01          STA $01FF				; Top of stack
+					.L7
+    0C24: 98                TYA
+					.L6
+					SM3=*+1
+    0C25: C0 10             CPY #$10
+    0C27: 90 03             BCC L5
+    0C29: A9 08             LDA #$08
+    0C2B: 18                CLC
+					.L5
+					SM2=*+2
+    0C2C: 99 00 E1          STA $E100,Y
+    0C2F: C8                INY
+    0C30: D0 F3             BNE L6
+    0C32: EE 2E 0C          INC SM2
+    0C35: AD 26 0C          LDA SM3
+    0C38: 69 10             ADC #$10
+    0C3A: 8D 26 0C          STA SM3
+    0C3D: 90 E5             BCC L7
+    0C3F: A9 00             LDA #$00
+    0C41: 85 F0             STA $F0
+    0C43: A9 10             LDA #$10
+    0C45: 85 F1             STA $F1
+    0C47: 4C CC 0C          JMP L13
+;--------------------------------------------------
+					.L8
+    0C4A: BD A3 0D          LDA L15,X
+    0C4D: 8D 66 0C          STA SM4
+    0C50: BD A4 0D          LDA L16,X
+    0C53: 8D 6F 0C          STA SM5
+    0C56: A2 01             LDX #$01
+    0C58: AD 0A D2          LDA RANDOM
+    0C5B: 8D 5F 0C          STA SM6
+					.L9
+					SM6=*+1
+    0C5E: A9 FF             LDA #$FF
+    0C60: 29 08             AND #$08
+    0C62: 8D 1F D0          STA CONSOL
+					SM4=*+1
+    0C65: 29 FF             AND #$FF
+    0C67: EA                NOP
+    0C68: 8D 1F D0          STA CONSOL
+    0C6B: CA                DEX
+    0C6C: D0 08             BNE L10
+					SM5=*+1
+    0C6E: A2 FF             LDX #$FF
+    0C70: AD 0A D2          LDA RANDOM
+    0C73: 8D 5F 0C          STA SM6
+					.L10
+    0C76: 88                DEY
+    0C77: D0 E5             BNE L9
+    0C79: 4C F8 0C          JMP L11              ;[expand]
+;--------------------------------------------------
+					.L28
+    0C7C: B3 F0             LAX ($F0),Y
+    0C7E: C8                INY
+    0C7F: B1 F0             LDA ($F0),Y
+    0C81: 85 F1             STA $F1
+    0C83: 86 F0             STX $F0
+    0C85: 88                DEY
+    0C86: F0 44             BEQ L13
+					.L24
+    0C88: A2 0C             LDX #$0C
+    0C8A: 8E 93 0D          STX L12
+    0C8D: 0A                ASL
+    0C8E: AA                TAX
+    0C8F: C9 28             CMP #$28
+    0C91: B0 B7             BCS L8
+    0C93: A9 02             LDA #$02
+    0C95: 85 F4             STA $F4
+    0C97: A9 01             LDA #$01
+    0C99: 85 F5             STA $F5
+    0C9B: BD A3 0D          LDA L15,X
+    0C9E: 8D B2 0C          STA SM1
+    0CA1: BD A4 0D          LDA L16,X
+    0CA4: 8D B7 0C          STA SM2
+    0CA7: A2 00             LDX #$00
+					.L2
+    0CA9: 98                TYA
+    0CAA: 4A                LSR
+    0CAB: 90 12             BCC L1
+    0CAD: C6 F5             DEC $F5
+    0CAF: D0 0E             BNE L1
+					SM1=*+1
+    0CB1: A9 FF             LDA #$FF
+    0CB3: 85 F5             STA $F5
+    0CB5: 18                CLC
+					SM2=*+1
+    0CB6: 69 FF             ADC #$FF
+    0CB8: 8D B2 0C          STA SM1
+    0CBB: 8A                TXA
+    0CBC: 49 08             EOR #$08
+    0CBE: AA                TAX
+					.L1
+    0CBF: 8E 1F D0          STX CONSOL
+    0CC2: 88                DEY
+    0CC3: D0 E4             BNE L2
+    0CC5: C6 F4             DEC $F4
+    0CC7: D0 E0             BNE L2
+    0CC9: 4C F8 0C          JMP L11              ;[expand]
+;--------------------------------------------------
+					.L13
+    0CCC: B1 F0             LDA ($F0),Y
+    0CCE: E6 F0             INC $F0
+    0CD0: D0 02             BNE L29
+    0CD2: E6 F1             INC $F1
+					.L29
+    0CD4: 85 F2             STA $F2
+    0CD6: B1 F0             LDA ($F0),Y
+    0CD8: E6 F0             INC $F0
+    0CDA: D0 02             BNE L34
+    0CDC: E6 F1             INC $F1
+					.L34
+    0CDE: 85 F3             STA $F3
+    0CE0: 05 F2             ORA $F2
+    0CE2: F0 98             BEQ L28
+    0CE4: B1 F2             LDA ($F2),Y
+    0CE6: 85 81             STA $81
+    0CE8: E6 F2             INC $F2
+    0CEA: D0 02             BNE L27
+    0CEC: E6 F3             INC $F3
+					.L27
+    0CEE: B1 F2             LDA ($F2),Y
+    0CF0: 85 83             STA $83
+    0CF2: E6 F2             INC $F2
+    0CF4: D0 02             BNE L11
+    0CF6: E6 F3             INC $F3
+					.L11
+    0CF8: B1 F2             LDA ($F2),Y
+    0CFA: E6 F2             INC $F2
+    0CFC: D0 02             BNE L26
+    0CFE: E6 F3             INC $F3
+					.L26
+    0D00: C9 02             CMP #$02
+    0D02: 90 08             BCC L25
+    0D04: C9 80             CMP #$80
+    0D06: 90 80             BCC L24
+    0D08: C9 FF             CMP #$FF
+    0D0A: F0 C0             BEQ L13
+					.L25
+    0D0C: A2 0F             LDX #$0F
+    0D0E: C9 01             CMP #$01
+    0D10: F0 23             BEQ L22
+    0D12: C9 00             CMP #$00
+    0D14: D0 0A             BNE L23
+    0D16: 85 90             STA $90
+    0D18: 85 89             STA $89
+    0D1A: A9 E0             LDA #$E0
+    0D1C: 85 94             STA $94
+    0D1E: D0 15             BNE L22
+					.L23
+    0D20: 87 90             SAX $90
+	
+	; === Expanded ===
+							STX $90
+							PHA
+							AND $90
+							STA $90
+							PLA
+	
+	: === End Expanded ===
+	
+    0D22: 4B F0             ASR #$F0
+    0D24: 4A                LSR
+    0D25: 4A                LSR
+    0D26: 4A                LSR
+    0D27: 09 E0             ORA #$E0
+    0D29: 85 94             STA $94
+    0D2B: B1 F2             LDA ($F2),Y
+    0D2D: E6 F2             INC $F2
+    0D2F: D0 02             BNE L21
+    0D31: E6 F3             INC $F3
+					.L21
+    0D33: 85 89             STA $89
+					.L22
+    0D35: B1 F2             LDA ($F2),Y
+    0D37: E6 F2             INC $F2
+    0D39: D0 02             BNE L30
+    0D3B: E6 F3             INC $F3
+					.L30
+    0D3D: C9 01             CMP #$01
+    0D3F: F0 23             BEQ L20
+    0D41: C9 00             CMP #$00
+    0D43: D0 0A             BNE L31
+    0D45: 85 9F             STA $9F
+    0D47: 85 99             STA $99
+    0D49: A9 E0             LDA #$E0
+    0D4B: 85 A6             STA $A6
+    0D4D: D0 15             BNE L20
+					.L31
+    0D4F: 87 9F             SAX $9F
+	
+	; === Expanded ===
+							STX $9F
+							PHA
+							AND $9F
+							STA $9F
+							PLA
+	
+	: === End Expanded ===
+	
+    0D51: 4B F0             ASR #$F0
+    0D53: 4A                LSR
+    0D54: 4A                LSR
+    0D55: 4A                LSR
+    0D56: 09 E0             ORA #$E0
+    0D58: 85 A6             STA $A6
+    0D5A: B1 F2             LDA ($F2),Y
+    0D5C: E6 F2             INC $F2
+    0D5E: D0 02             BNE L19
+    0D60: E6 F3             INC $F3
+					.L19
+    0D62: 85 99             STA $99
+					.L20
+    0D64: B1 F2             LDA ($F2),Y
+    0D66: E6 F2             INC $F2
+    0D68: D0 02             BNE L32
+    0D6A: E6 F3             INC $F3
+					.L32
+    0D6C: C9 01             CMP #$01
+    0D6E: F0 23             BEQ L12
+    0D70: C9 00             CMP #$00
+    0D72: D0 0A             BNE L18
+    0D74: 85 B1             STA $B1
+    0D76: 85 AB             STA $AB
+    0D78: A9 E0             LDA #$E0
+    0D7A: 85 B8             STA $B8
+    0D7C: D0 15             BNE L12
+					.L18
+    0D7E: 87 B1             SAX $B1
+    0D80: 4B F0             ASR #$F0
+    0D82: 4A                LSR
+    0D83: 4A                LSR
+    0D84: 4A                LSR
+    0D85: 09 E0             ORA #$E0
+    0D87: 85 B8             STA $B8
+    0D89: B1 F2             LDA ($F2),Y
+    0D8B: E6 F2             INC $F2
+    0D8D: D0 02             BNE L33
+    0D8F: E6 F3             INC $F3
+					.L33
+    0D91: 85 AB             STA $AB
+				.L12
+    0D93: 0C 80 00          NOP $0080
+    0D96: A9 4C             LDA #$4C
+    0D98: 8D 93 0D          STA L12
+    0D9B: 18                CLC
+    0D9C: A5 81             LDA $81
+    0D9E: 69 6A             ADC #$6A
+    0DA0: A8                TAY
+    0DA1: D0 01             BNE L16
+				.L15
+    0DA3: C8                INY
+				.L16
+    0DA4: 4C 82 00          JMP L17              

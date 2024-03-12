@@ -1,0 +1,491 @@
+;Tritone beeper music engine
+;Original Z80 code by Shiru 03'2011, released as Public Domain
+;1tracker version by Shiru 03'2018
+;6502 engine port by utz 03'2024
+;Ported to the BBC Micro by Negative Charge 03'2024
+
+; Constants
+OSBYTE                  = $FFF4
+OSWRCH                  = $FFEE
+OSNEWL                  = $FFE7
+SHEILABASE              = $FE00             ; System peripherals
+SYSVIA_DDRA             = SHEILABASE + $43  ; Data direction register A
+SYSVIA_ORAS             = SHEILABASE + $4F  ; Same as REGA but with no handshake I/O
+SYSVIA_REGB             = SHEILABASE + $40  ; Port B I/O
+
+DISPLAY_START           = $7c00
+DEBUG                   = TRUE
+ROW_DEBUG               = FALSE
+
+OP_NOP                  = $EA
+OP_ROL_A                = $2A
+
+; Zero Page
+ORG     $5f
+GUARD   $8f
+
+.vars_start
+
+.loop_ptr           SKIP 2
+.pattern_ptr        SKIP 2
+.speed              SKIP 2
+
+.drum               SKIP 1
+
+.vars_end
+
+ORG     &1100
+GUARD   DISPLAY_START
+
+.start
+
+INCLUDE "lib\os.s.6502" 
+
+; Write data to sound chip then add processing delay
+MACRO sound_write_slow
+    sta     SYSVIA_ORAS        ;4 Write reg/data to SN76489
+
+    lda     #%00000000         ;2
+    sta     SYSVIA_REGB        ;4 
+    nop                        ;2
+    nop                        ;2
+    nop                        ;2
+    lda     #%00001000         ;2
+    sta     SYSVIA_REGB        ;4
+ENDMACRO
+
+MACRO RESET_SOUND_CHIP
+    ; Zero volumes on all SN76489 channels, just in case anything already playing
+    lda     #%11111111
+    sound_write_slow                                ; Channel 3 (Noise)
+    lda     #%11011111
+    sound_write_slow                                ; Channel 2
+    lda     #%10111111
+    sound_write_slow                                ; Channel 1
+    lda     #%10011111
+    sound_write_slow                                ; Channel 0
+ENDMACRO
+
+.init
+    ; Print Track Title
+    ldx     #1
+    ldy     #22
+    jsr     moveTextCursor
+
+    jsr     printString
+    equs    "The Liberty Bell",0
+
+    ; Print Track Artist
+    ldx     #1
+    ldy     #24
+    jsr     moveTextCursor
+
+    jsr     printString
+    equs    "John Philip Sousa",0
+
+    ; Set up audio
+    
+    ; System VIA port A to all outputs
+    lda     #%11111111
+    sta     SYSVIA_DDRA
+
+    sei
+
+    RESET_SOUND_CHIP
+
+    ; Period to 1 on tone channel 0
+    lda     #%10000001
+    sound_write_slow                                ; Channel 0
+    lda     #%00000000
+    sound_write_slow
+
+    ; System VIA Port A, place accumulator on wires, no handshake
+    lda     #%00000000         
+    sta     SYSVIA_REGB
+
+    lda     #LO(music_data)
+    ldx     #HI(music_data)
+
+.play
+
+    pha
+    txa
+    pha
+    
+    lda     #0
+    tax
+.zero_page_reset_loop
+    sta     vars_start,x
+    inx
+    cpx     #vars_end-vars_start
+    bne     zero_page_reset_loop
+    
+    pla
+    sta     pattern_ptr+1
+    pla
+    sta     pattern_ptr+0
+
+IF DEBUG
+        pha:txa:pha:tya:pha
+
+        ldx     #1
+        ldy     #1
+        jsr     moveTextCursor
+        jsr     printString
+        equs    "Pattern Pointer: ",0
+
+        lda     pattern_ptr+1
+        jsr     s_print_hex
+        lda     pattern_ptr+0
+        jsr     s_print_hex
+        jsr     OSNEWL
+
+        pla:tay:pla:tax:pla
+ENDIF
+
+    ldy     #0
+    lda     (pattern_ptr),y
+    sta     loop_ptr+0
+
+    iny
+    lda     (pattern_ptr),y
+    sta     loop_ptr+1
+    
+IF DEBUG
+        pha:txa:pha:tya:pha
+
+        ldx     #1
+        ldy     #2
+        jsr     moveTextCursor
+
+        jsr     printString
+        equs    "Loop Pointer   : ",0
+
+        lda     loop_ptr+1
+        jsr     s_print_hex
+        lda     loop_ptr+0
+        jsr     s_print_hex
+        jsr     OSNEWL
+
+        pla:tay:pla:tax:pla
+ENDIF
+
+    lda     pattern_ptr+0
+    clc
+    adc     #6
+    sta     pattern_ptr+0
+    bcc     play_loop
+    inc     pattern_ptr+1
+
+.play_loop
+
+    ldy     #1
+    lda     (pattern_ptr),y
+    bne     no_loop
+    
+.return_loop
+
+    lda     loop_ptr+0
+    sta     pattern_ptr+0
+    lda     loop_ptr+1
+    sta     pattern_ptr+1
+    jmp     play_loop
+
+.no_loop
+    iny
+    lda     (pattern_ptr),y
+	iny
+	sta     speed+0
+    sta     row_length_lo
+	lda     (pattern_ptr),y
+    iny
+	sta     speed+1
+    sta     row_length_hi
+
+IF DEBUG
+        pha:txa:pha:tya:pha
+
+        ldx     #1
+        ldy     #4
+        jsr     moveTextCursor
+
+        jsr     printString
+        equs    "Speed          : ",0
+
+        lda     speed+1
+        jsr     s_print_hex
+        lda     speed+0
+        jsr     s_print_hex
+        jsr     OSNEWL
+
+        pla:tay:pla:tax:pla
+ENDIF
+
+jmp     row
+
+.pattern_end
+    cli                             ; Enable interrupts
+
+    RESET_SOUND_CHIP
+
+    rts
+
+.row
+    ldy     #0
+    lda     (pattern_ptr),y
+    bne     ch0                     ; Row value is zero
+
+    sta     drum                    ; Silent
+    sta     ch0_duty
+    sta     ch0_div_lo
+    sta     ch0_div_hi
+    jmp     skip_ch0
+
+.ch0
+    cmp     #$ff
+    beq     pattern_end
+    cmp     #$01
+    beq     skip_ch0                ; Same as previous ch0 entry
+    cmp     #$80
+    bcc     skip_drum
+    sta     drum
+
+    iny
+    lda     (pattern_ptr),y
+
+.skip_drum
+    pha
+    lsr     a
+    lsr     a
+    lsr     a
+    lsr     a
+    sta     ch0_duty                ; ch0_div_hi | ch0_div_lo = 12-bit frequency counter
+    pla
+
+    and     #%00001111
+    sta     ch0_div_hi
+
+    iny
+    lda     (pattern_ptr),y
+    sta     ch0_div_lo
+
+.skip_ch0
+    iny
+    lda     (pattern_ptr),y
+    bne     ch1                     ; Row value is zero
+
+    sta     ch1_duty
+    sta     ch1_div_lo
+    sta     ch1_div_hi
+    jmp     skip_ch1
+
+.ch1
+    cmp     #$01
+    beq     skip_ch1                ; Same as previous ch0 entry
+    pha
+    lsr     a
+    lsr     a
+    lsr     a
+    lsr     a
+    sta     ch1_duty
+    pla
+
+    and     #%00001111
+    sta     ch1_div_hi              ; ch1_div_hi | ch1_div_lo = 12-bit frequency counter
+
+    iny
+    lda     (pattern_ptr),y
+    sta     ch1_div_lo
+
+.skip_ch1
+    iny
+    lda     (pattern_ptr),y
+    bne     ch2                     ; Row value is zero
+    
+    sta     ch2_duty
+    sta     ch2_div_lo
+    sta     ch2_div_hi
+    jmp     skip_ch2
+
+.ch2
+    cmp     #$01
+    beq     skip_ch2                ; Same as previous ch0 entry
+    pha
+    lsr     a
+    lsr     a
+    lsr     a
+    lsr     a
+    sta     ch2_duty
+    pla
+
+    and     #%00001111
+    sta     ch2_div_hi              ; ch2_div_hi | ch2_div_lo = 12-bit frequency counter
+
+    iny
+    lda     (pattern_ptr),y
+    sta     ch2_div_lo
+
+.skip_ch2
+    tya
+
+row_length_lo=*+1
+    ldx     #0                     ;   reset row length counter lo byte
+row_length_hi=*+1
+    ldy     #0
+
+IF ROW_DEBUG
+    jsr     printRowInfo
+ENDIF
+
+    clc
+    adc     pattern_ptr+0
+    sta     pattern_ptr+0
+    bcc     play_note
+    inc     pattern_ptr+1
+
+.play_note
+
+    clc                             ;2  update osc
+
+ch0_div_lo=*+1
+    lda     #$0                     ;2
+ch0_acc_lo=*+1
+    adc     #$0                     ;2
+    sta ch0_acc_lo                  ;4
+ch0_div_hi=*+1
+    lda     #$0                     ;2
+ch0_acc_hi=*+1
+    adc     #$0                     ;2
+    sta     ch0_acc_hi              ;4
+ch0_duty=*+1
+    cmp     #$0                     ;2  compare against duty threshold
+    sbc     ch0_acc_hi              ;4  A = 0 on low half-cycle, FF on hi half-cycle
+    and     #%00001111              ;2
+    ora     #%10010000              ;2
+    sta     SYSVIA_ORAS             ;4
+
+    clc                             ;2
+ch1_div_lo=*+1
+    lda     #$0                     ;2
+ch1_acc_lo=*+1
+    adc     #$0                     ;2
+    sta     ch1_acc_lo              ;4
+ch1_div_hi=*+1
+    lda     #$0                     ;2
+ch1_acc_hi=*+1
+    adc     #$0                     ;2
+    sta     ch1_acc_hi              ;4
+ch1_duty=*+1
+    cmp     #$0                     ;2
+    sbc     ch1_acc_hi              ;4
+    and     #%00001111              ;2
+    ora     #%10010000              ;2
+    sta     SYSVIA_ORAS             ;4
+
+    clc                             ;2
+ch2_div_lo=*+1
+    lda     #$0                     ;2
+ch2_acc_lo=*+1
+    adc     #$0                     ;2
+    sta     ch2_acc_lo              ;4
+ch2_div_hi=*+1
+    lda     #$0                     ;2
+ch2_acc_hi=*+1
+    adc     #$0                     ;2
+    sta     ch2_acc_hi              ;4
+ch2_duty=*+1
+    cmp     #$0                     ;2
+    sbc     ch2_acc_hi              ;4
+    and     #%00001111              ;2
+    ora     #%10010000              ;2
+    sta     SYSVIA_ORAS             ;2
+
+    dex                             ;2  row length low byte
+    bne     play_note               ;3 -- 95 ~ 21053Hz (original is 22876Hz)
+
+    dey                             ; row length hi byte
+    bne     play_note
+
+    jmp     row
+
+.s_print_hex
+        pha                            ; Save A
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a                      ; Move top nybble to bottom nybble
+        jsr     printNybble
+        pla
+        and     #&0f                   ; Mask out original bottom nybble
+.printNybble
+        sed
+        clc
+        adc     #&90                   ; Produce &90-&99 or &00-&05
+        adc     #&40                   ; Produce &30-&39 or &41-&46
+        cld
+        jmp     OSWRCH                 ; Print it
+
+.printRowInfo
+
+        pha:txa:pha:tya:pha
+
+        ldx     #1
+        ldy     #8
+        jsr     moveTextCursor
+
+        jsr     printString
+        equs    "Row: ",0
+
+        lda     ch0_div_hi
+        jsr     s_print_hex
+        lda     ch0_div_lo
+        jsr     s_print_hex
+
+        ldx     #11
+        ldy     #8
+        jsr     moveTextCursor
+        
+        lda     ch1_div_hi
+        jsr     s_print_hex
+        lda     ch1_div_lo
+        jsr     s_print_hex
+        
+        ldx     #16
+        ldy     #8
+        jsr     moveTextCursor
+
+        lda     ch2_div_hi
+        jsr     s_print_hex
+        lda     ch2_div_lo
+        jsr     s_print_hex
+
+        pla:tay:pla:tax:pla
+
+        rts
+
+INCLUDE "tracks\liberty_bell_tritone.6502" 
+
+.end
+
+SAVE "MAIN",start,end,init
+
+\ ******************************************************************
+\ *    Memory Info
+\ ******************************************************************
+
+PRINT "-----------------------"
+PRINT " 1-BIT TRITONE PLAYER  "
+PRINT "-----------------------"
+PRINT "CODE size       = ", ~end-start
+PRINT "-----------------------"
+PRINT "HIGH WATERMARK  = ", ~P%
+PRINT "FREE            = ", ~start+end
+PRINT "-----------------------"
+
+\ ******************************************************************
+\ * Supporting Files
+\ ******************************************************************
+
+PUTBASIC "loader.bas","LOADER"
+PUTFILE  "screens\title.bin","TITLE",DISPLAY_START
+PUTFILE  "BOOT","!BOOT",$ffff

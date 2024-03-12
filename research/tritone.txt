@@ -1,0 +1,47 @@
+Tritone v2 - ZX Spectrum beeper music engine
+Original Z80 code by Shiru 03'2011, released as Public Domain
+1tracker version by Shiru 03'2018
+
+Tritone Digi - ZX Spectrum beeper music engine
+Engine and 1tracker version by Shiru 03'2018
+
+
+Original Tritone engine features three channels of tone with duty cycle 
+control and detune support, a set of predefined interrupting clicky 
+drums, global speed. 
+
+There is two options on volume mixing that can be changed in the 
+Instrument editor tab (F4). In 'Equal' mode all three channels will have 
+equal volume. 'Different' mode makes each channel slightly louder than 
+previous one, which is useful to create echoes and other effects. Unlike 
+most engines, duty cycle and volume are unrelated here, different volume 
+does not affect the timbre. 
+
+Tritone Digi is just like the original, with a little better sound 
+quality, customizeable interrupting sampled drums support, and per-row 
+speed. Three channels of tone with duty cycle control. Unlike the 
+original, it always uses unequal volume ratio. 
+
+
+The columns are:
+
+   T1 dW T2 dW T3 dW Dr
+   ..... ..... ..... ..
+   |   | |   | |   | 
+   +ch1+ +ch2+ +ch3+
+
+Sp T1 dW T2 dW T3 dW D
+.. ..... ..... ..... .
+   |   | |   | |   | 
+   +ch1+ +ch2+ +ch3+
+  
+Sp : Speed (Tritone Digi only), 1..31
+
+T1,T2,T3: Tone channels, have uniform capabilities
+ Tn : Note, C-0..B-7
+  d : Detune, 1..9
+  W : Duty cycle, 1..8 (1 is 50% square wave, 8 is thin narrow pulse sound)
+  
+ Dr : Clicky drum (original Tritone only), 1..24
+ 
+  D : Sample drum, 1..7

@@ -1,0 +1,70 @@
+Tritone
+=======
+
+    ldx #$0                     ;   reset row length counter lo byte
+
+.play_note
+    clc                         ;2  update osc
+.ch1_div_lo
+    lda #$0                     ;2
+.ch1_acc_lo
+    adc #$0                     ;2
+    sta ch1_acc_lo+1            ;4
+.ch1_div_hi
+    lda #$0                     ;2
+.ch1_acc_hi
+    adc #$0                     ;2
+    sta ch1_acc_hi+1            ;4
+.ch1_duty
+    cmp #$0                     ;2  compare against duty threshold
+    sbc ch1_acc_hi              ;4  A = 0 on low half-cycle, FF on hi half-cycle
+    and #%00001111              ;2
+    sta SYSVIA_ORAS             ;4
+
+    clc                         ;2
+.ch2_div_lo
+    lda #$0                     ;2
+.ch2_acc_lo
+    adc #$0                     ;2
+    sta ch2_acc_lo+1            ;4
+.ch2_div_hi
+    lda #$0                     ;2
+.ch2_acc_hi
+    adc #$0                     ;2
+    sta ch2_acc_hi+1            ;4
+.ch2_duty
+    cmp #$0                     ;2
+    sbc ch2_acc_hi              ;4
+    and #%00001111              ;2
+    sta SYSVIA_ORAS             ;4
+
+    clc                         ;2
+.ch3_div_lo
+    lda #$0                     ;2
+.ch3_acc_lo
+    adc #$0                     ;2
+    sta ch3_acc_lo+1            ;4
+.ch3_div_hi
+    lda #$0                     ;2
+.ch3_acc_hi
+    adc #$0                     ;2
+    sta ch3_acc_hi+1            ;4
+.ch3_duty
+    cmp #$0                     ;2
+    sbc ch3_acc_hi              ;4
+    and #%00001111              ;2
+    sta SYSVIA_ORAS             ;2
+
+    dex                         ;2  row length low byte
+    beq play_note               ;3 -- 95 ~ 21053Hz (original is 22876Hz)
+
+    dey                         ; row length hi byte
+    beq play_note
+
+
+If you want to use unequal volumes (which could definitely come in handy), you need to shift the outputs around a bit somehow. In the original unqual volume, the outputs are distributed at a ratio of 34:49:70 cycles.
+As far as data reading goes, I didn't bother since you're probably better off just design your own data scheme.
+Noise mode can be tacked onto this design easily by adding
+    rol
+    adc #0
+after adding chx_acc_hi, and using #$2174 as frequency divider value. The duty setting will act more or less as a volume control on that. Or tack on the PWM sample code from SquatM, but beware that this engine is overall much quieter, so PWM samples at full blast may be too loud. Speaking of quiet, I think this will be the main problem with this code - it'll probably be too quiet on the SN, so you might want to write to all 3 tone channels instead of just one. Or even better, output each channel on its own SN tone channel.
