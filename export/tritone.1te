@@ -389,8 +389,8 @@ const float zxCpuTime=153.0f;
 const float zxCpuClock=3500000.0f;
 const float atariCpuTime=197.0f;	//in fact 177, but it messes up the pitch somehow; song speed also needs to be decreased by 1 to match
 const float atariCpuClock=1773447.0f;	//others, ntsc uses an extra delay in player
-const float bbcCpuTime=200.0f;
-const float bbcCpuClock=2000000.0f;
+const float bbcCpuTime=197.0f;
+const float bbcCpuClock=1773447.0f;
 
 void GenerateNotePeriods(float cpuClock,float cpuTime)
 {
@@ -499,7 +499,7 @@ void Compile(uint format,uint startRow,uint oneShot,uint useMute)
 	int ch1_word,ch2_word,ch3_word;
 	int ch1_word_prev,ch2_word_prev,ch3_word_prev;
 	int drum_type;
-	string db,dw,ds,hex,loc,lbl1,lbl2;
+	string db,dw,ds,hex,loc,lbl1,lbl2,lbl3;
 
 	switch(format)
 	{	
@@ -515,7 +515,8 @@ void Compile(uint format,uint startRow,uint oneShot,uint useMute)
 				hex="#";
 				loc=".";
 				lbl1="";
-				lbl2=":";
+				lbl2="";
+				lbl3=".";
 				
 				GenerateNotePeriods(zxCpuClock,zxCpuTime);
 		    }
@@ -529,6 +530,7 @@ void Compile(uint format,uint startRow,uint oneShot,uint useMute)
 				loc="@";
 				lbl1="";
 				lbl2=":";
+				lbl3="@";
 				
 				GenerateNotePeriods(atariCpuClock,atariCpuTime);
 			}
@@ -542,6 +544,7 @@ void Compile(uint format,uint startRow,uint oneShot,uint useMute)
 				loc="";
 				lbl1=".";
 				lbl2="";
+				lbl3=".";
 				
 				GenerateNotePeriods(bbcCpuClock,bbcCpuTime);
 			}
@@ -576,11 +579,11 @@ void Compile(uint format,uint startRow,uint oneShot,uint useMute)
 	TextFilePutString(";compiled music data\n\n");
 	TextFilePutString(lbl1+"music_data\n");
 	TextFilePutString("\t"+dw+" "+loc+"pattern1\n");
-	TextFilePutString(lbl1+"loop"+lbl2+"\n");
+	TextFilePutString(lbl3+"loop"+lbl2+"\n");
 	TextFilePutString("\t"+dw+" "+loc+"pattern2\n");
 	TextFilePutString("\t"+dw+" 0\n");
 	TextFilePutString("\t"+dw+" "+loc+"loop\n");
-	TextFilePutString(lbl1+"pattern1"+lbl2+"\n");
+	TextFilePutString(lbl3+"pattern1"+lbl2+"\n");
 	TextFilePutString("\t"+dw+" "+hex+formatInt(speed,"0h",4)+"\n");
 
 	//search for initial parameters in preceding rows
@@ -653,7 +656,7 @@ void Compile(uint format,uint startRow,uint oneShot,uint useMute)
 		if(row==loopRow)
 		{
 			TextFilePutString("\t"+db+" "+hex+"ff\n");	//pattern end
-			TextFilePutString(lbl1+"pattern2"+lbl2+"\n");
+			TextFilePutString(lbl3+"pattern2"+lbl2+"\n");
 			TextFilePutString("\t"+dw+" "+hex+formatInt(speed,"0h",4)+"\n");
 			
 			ch1_word_prev=-1;
@@ -802,7 +805,7 @@ void Compile(uint format,uint startRow,uint oneShot,uint useMute)
 	if(oneShot==1||takeLoop==0)
 	{
 		TextFilePutString("\t"+db+" "+hex+"ff\n");			//pattern end
-		TextFilePutString(lbl1+"pattern2"+lbl2+"\n");
+		TextFilePutString(lbl3+"pattern2"+lbl2+"\n");
 		TextFilePutString("\t"+dw+" "+hex+formatInt(speed,"0h",4)+"\n");
 		TextFilePutString("\t"+db+" "+hex+"00,"+hex+"00,"+hex+"00\n");	//mute sound
 	}
