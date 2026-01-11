@@ -1,9 +1,9 @@
-;Tritone beeper music engine - HIGHLY OPTIMIZED VERSION
+;Tritone beeper music engine - DATA FORMAT CORRECTED
 ;Original Z80 code by Shiru 03'2011, released as Public Domain
 ;1tracker version by Shiru 03'2018
 ;6502 engine port by utz 03'2024
 ;Ported to the BBC Micro by Negative Charge 03'2024
-;Optimized for speed and cycle balance
+;Fixed: Correct interpretation of data format
 
 ; Constants
 OSBYTE                  = $FFF4
@@ -15,47 +15,36 @@ SYSVIA_ORAS             = SHEILABASE + $4F
 SYSVIA_REGB             = SHEILABASE + $40
 
 DISPLAY_START           = $7c00
-DEBUG                   = TRUE
-ROW_DEBUG               = FALSE
+DEBUG                   = FALSE
 
-OP_NOP                  = $EA
-OP_ROL_A                = $2A
-
-; Zero Page - optimally arranged
+; Zero Page
 ORG     $60
 GUARD   $90
 
 .vars_start
 
-; CRITICAL: Most frequently accessed in play_note loop
-.ch0_acc_lo         SKIP 1      ; $60
-.ch0_acc_hi         SKIP 1      ; $61
-.ch1_acc_lo         SKIP 1      ; $62
-.ch1_acc_hi         SKIP 1      ; $63
-.ch2_acc_lo         SKIP 1      ; $64
-.ch2_acc_hi         SKIP 1      ; $65
+.ch0_acc_lo         SKIP 1
+.ch0_acc_hi         SKIP 1
+.ch1_acc_lo         SKIP 1
+.ch1_acc_hi         SKIP 1
+.ch2_acc_lo         SKIP 1
+.ch2_acc_hi         SKIP 1
 
-.ch0_div_lo         SKIP 1      ; $66
-.ch0_div_hi         SKIP 1      ; $67
-.ch1_div_lo         SKIP 1      ; $68
-.ch1_div_hi         SKIP 1      ; $69
-.ch2_div_lo         SKIP 1      ; $6A
-.ch2_div_hi         SKIP 1      ; $6B
+.ch0_div_lo         SKIP 1
+.ch0_div_hi         SKIP 1
+.ch1_div_lo         SKIP 1
+.ch1_div_hi         SKIP 1
+.ch2_div_lo         SKIP 1
+.ch2_div_hi         SKIP 1
 
-.ch0_duty           SKIP 1      ; $6C
-.ch1_duty           SKIP 1      ; $6D
-.ch2_duty           SKIP 1      ; $6E
+.ch0_duty           SKIP 1
+.ch1_duty           SKIP 1
+.ch2_duty           SKIP 1
 
-; Counter for row loop
-.counter_lo         SKIP 1      ; $6F
-.counter_hi         SKIP 1      ; $70
-
-; Less critical variables
-.loop_ptr           SKIP 2      ; $71-72
-.pattern_ptr        SKIP 2      ; $73-74
-.speed              SKIP 2      ; $75-76
-.drum               SKIP 1      ; $77
-.row_length         SKIP 2      ; $78-79
+.loop_ptr           SKIP 2
+.pattern_ptr        SKIP 2
+.drum               SKIP 1
+.row_length         SKIP 2
 
 .vars_end
 
@@ -66,19 +55,11 @@ GUARD   DISPLAY_START
 
 INCLUDE "lib\os.s.6502" 
 
-; Ultra-fast sound write
-MACRO sound_write_ultra
-    sta     SYSVIA_ORAS
-ENDMACRO
-
-; Write with delay
 MACRO sound_write_slow
     sta     SYSVIA_ORAS
     lda     #%00000000
     sta     SYSVIA_REGB
-    nop
-    nop
-    nop
+    nop:nop:nop
     lda     #%00001000
     sta     SYSVIA_REGB
 ENDMACRO
@@ -95,23 +76,16 @@ MACRO RESET_SOUND_CHIP
 ENDMACRO
 
 .init
-    ; Print Track Title
-    ldx     #1
-    ldy     #22
+    ldx     #1:ldy     #22
     jsr     moveTextCursor
-
     jsr     printString
     equs    "The Liberty Bell",0
 
-    ; Print Track Artist
-    ldx     #1
-    ldy     #24
+    ldx     #1:ldy     #24
     jsr     moveTextCursor
-
     jsr     printString
     equs    "John Philip Sousa",0
 
-    ; Set up audio
     lda     #%11111111
     sta     SYSVIA_DDRA
 
@@ -119,7 +93,6 @@ ENDMACRO
 
     RESET_SOUND_CHIP
 
-    ; Period to 1 on all tone channels
     lda     #%10000001
     sound_write_slow
     lda     #%00000000
@@ -142,80 +115,24 @@ ENDMACRO
     ldx     #HI(music_data)
 
 .play
-
-    pha
-    txa
-    pha
+    pha:txa:pha
     
-    ; Ultra-fast zero page reset - unrolled
+    ; Clear ZP
     lda     #0
-    sta     $60     ; ch0_acc_lo
-    sta     $61     ; ch0_acc_hi
-    sta     $62     ; ch1_acc_lo
-    sta     $63     ; ch1_acc_hi
-    sta     $64     ; ch2_acc_lo
-    sta     $65     ; ch2_acc_hi
-    sta     $66     ; ch0_div_lo
-    sta     $67     ; ch0_div_hi
-    sta     $68     ; ch1_div_lo
-    sta     $69     ; ch1_div_hi
-    sta     $6A     ; ch2_div_lo
-    sta     $6B     ; ch2_div_hi
-    sta     $6C     ; ch0_duty
-    sta     $6D     ; ch1_duty
-    sta     $6E     ; ch2_duty
+    ldx     #$0F
+.clear_loop
+    sta     $60,x
+    dex
+    bpl     clear_loop
     
-    pla
-    sta     pattern_ptr+1
-    pla
-    sta     pattern_ptr+0
-
-IF DEBUG
-        pha:txa:pha:tya:pha
-
-        ldx     #1
-        ldy     #1
-        jsr     moveTextCursor
-        jsr     printString
-        equs    "Pattern Pointer: ",0
-
-        lda     pattern_ptr+1
-        jsr     s_print_hex
-        lda     pattern_ptr+0
-        jsr     s_print_hex
-        jsr     OSNEWL
-
-        pla:tay:pla:tax:pla
-ENDIF
+    pla:sta pattern_ptr+1
+    pla:sta pattern_ptr+0
 
     ldy     #0
-    lda     (pattern_ptr),y
-    sta     loop_ptr+0
-
+    lda     (pattern_ptr),y:sta loop_ptr+0
     iny
-    lda     (pattern_ptr),y
-    sta     loop_ptr+1
+    lda     (pattern_ptr),y:sta loop_ptr+1
     
-IF DEBUG
-        pha:txa:pha:tya:pha
-
-        ldx     #1
-        ldy     #2
-        jsr     moveTextCursor
-
-        jsr     printString
-        equs    "Loop Pointer   : ",0
-
-        lda     loop_ptr+1
-        jsr     s_print_hex
-        lda     loop_ptr+0
-        jsr     s_print_hex
-        jsr     OSNEWL
-
-        pla:tay:pla:tax:pla
-ENDIF
-
-    ; Optimized pointer increment
     lda     pattern_ptr+0
     clc
     adc     #5
@@ -224,241 +141,215 @@ ENDIF
     inc     pattern_ptr+1
 
 .play_loop
-
     ldy     #1
     lda     (pattern_ptr),y
     bne     no_loop
     
 .return_loop
-
-    lda     loop_ptr+0
-    sta     pattern_ptr+0
-    lda     loop_ptr+1
-    sta     pattern_ptr+1
+    lda     loop_ptr+0:sta pattern_ptr+0
+    lda     loop_ptr+1:sta pattern_ptr+1
     jmp     play_loop
 
 .no_loop
     iny
-    lda     (pattern_ptr),y
-    sta     row_length+0
+    lda     (pattern_ptr),y:sta row_length+0
     iny
-    lda     (pattern_ptr),y
-    sta     row_length+1
-
-IF DEBUG
-        pha:txa:pha:tya:pha
-
-        ldx     #1
-        ldy     #4
-        jsr     moveTextCursor
-
-        jsr     printString
-        equs    "Speed          : ",0
-
-        lda     row_length+1
-        jsr     s_print_hex
-        lda     row_length+0
-        jsr     s_print_hex
-        jsr     OSNEWL
-
-        pla:tay:pla:tax:pla
-ENDIF
-
-jmp     row
+    lda     (pattern_ptr),y:sta row_length+1
+    jmp     row
 
 .pattern_end
     cli
-
     RESET_SOUND_CHIP
-
     rts
 
 .row
+    ; Z80 logic:
+    ; ld a,(hl) / inc hl / cp 2 / jr c,.ch0
+    ; If < 2, go to ch0 (values 0 or 1)
+    ; cp 128 / jr c,drumSound
+    ; If 2-127, it's a drum
+    ; cp 255 / jp z,nextPos
+    ; If 255, pattern end
+    ; Otherwise (128-254), fall through to ch0
+    
     ldy     #0
     lda     (pattern_ptr),y
-    bne     ch0
-
-    ; Fast channel 0 clear - use A=0 already loaded
-    sta     $6C     ; ch0_duty
-    sta     $66     ; ch0_div_lo
-    sta     $67     ; ch0_div_hi
-    sta     drum
-    jmp     skip_ch0
+    iny                     ; Y=1 now
+    
+    cmp     #2
+    bcc     ch0             ; If < 2 (0 or 1), go to ch0
+    
+    cmp     #128
+    bcc     drum_cmd        ; If 2-127, it's a drum
+    
+    cmp     #255
+    beq     pattern_end     ; If 255, end pattern
+    
+    ; Otherwise 128-254, fall through to ch0 processing
+    ; This byte IS the ch0 data
+    dey                     ; Y=0 again since we haven't consumed this byte yet
 
 .ch0
-    cmp     #$ff
-    beq     pattern_end
-    cmp     #$01
-    beq     skip_ch0
-    cmp     #$80
-    bcc     skip_drum
-    sta     drum
-
-    iny
     lda     (pattern_ptr),y
+    iny                     ; Consume ch0 byte, Y now points to next
+    
+    cmp     #1
+    beq     skip_ch0        ; Reuse previous ch0
+    
+    bne     ch0_check_note
+    ; A = 0: clear channel
+    sta     ch0_duty:sta ch0_div_lo:sta ch0_div_hi
+    jmp     skip_ch0
 
-.skip_drum
-    ; Store duty in high nibble, freq_hi in low nibble
-    tax                 ; Save original value
+.ch0_check_note
+    ; A != 0 and A != 1, so it's note data
+    tax
     and     #$0f
     sta     ch0_div_hi
     txa
     and     #$f0
     sta     ch0_duty
-    iny
     lda     (pattern_ptr),y
+    iny
     sta     ch0_div_lo
+    jmp     skip_ch0
+
+.drum_cmd
+    ; A contains drum value (2-127)
+    ; Store it and read next byte for ch0
+    sta     drum
+    jmp     ch0
 
 .skip_ch0
-    iny
+    ; Y points to ch1 byte
     lda     (pattern_ptr),y
-    bne     ch1
-
-    ; Fast channel 1 clear
-    sta     $6D     ; ch1_duty (A=0)
-    sta     $68     ; ch1_div_lo
-    sta     $69     ; ch1_div_hi
+    iny
+    
+    cmp     #1
+    beq     skip_ch1
+    
+    bne     ch1_check_note
+    sta     ch1_duty:sta ch1_div_lo:sta ch1_div_hi
     jmp     skip_ch1
 
-.ch1
-    cmp     #$01
-    beq     skip_ch1
+.ch1_check_note
     tax
-    and     #$0f
-    sta     $69     ; ch1_div_hi
+    and     #$0f:sta ch1_div_hi
     txa
-    and     #$f0
-    sta     $6D     ; ch1_duty
-
-    iny
+    and     #$f0:sta ch1_duty
     lda     (pattern_ptr),y
-    sta     $68     ; ch1_div_lo
+    iny
+    sta     ch1_div_lo
 
 .skip_ch1
-    iny
+    ; Y points to ch2 byte
     lda     (pattern_ptr),y
-    bne     ch2
+    iny
     
-    ; Fast channel 2 clear
-    sta     $6E     ; ch2_duty (A=0)
-    sta     $6A     ; ch2_div_lo
-    sta     $6B     ; ch2_div_hi
+    cmp     #1
+    beq     skip_ch2
+    
+    bne     ch2_check_note
+    sta     ch2_duty:sta ch2_div_lo:sta ch2_div_hi
     jmp     skip_ch2
 
-.ch2
-    cmp     #$01
-    beq     skip_ch2
+.ch2_check_note
     tax
-    and     #$0f
-    sta     $6B     ; ch2_div_hi
+    and     #$0f:sta ch2_div_hi
     txa
-    and     #$f0
-    sta     $6E     ; ch2_duty
-
-    iny
+    and     #$f0:sta ch2_duty
     lda     (pattern_ptr),y
-    sta     $6A     ; ch2_div_lo
+    iny
+    sta     ch2_div_lo
 
 .skip_ch2
-    ; Update pattern pointer - optimized
+    ; Y now contains the number of bytes consumed
     tya
-    adc     pattern_ptr+0
-    sta     pattern_ptr+0
+    clc
+    adc     pattern_ptr+0:sta pattern_ptr+0
     bcc     setup_play_loop
     inc     pattern_ptr+1
 
 .setup_play_loop
-    ; Initialize counter from row_length
     lda     row_length+0
-    sta     counter_lo
-    lda     row_length+1
-    sta     counter_hi
-    
-    ; Safety: If speed is 0, skip the row
-    ora     counter_lo
+    ora     row_length+1
     beq     row_finished
+    
+    ldx     row_length+0
+    ldy     row_length+1
 
 ; ===================================================================
-; CRITICAL INNER LOOP - FULLY CYCLE-BALANCED
-; This is the most frequently executed code - every cycle matters!
+; INNER LOOP - Maximum speed
 ; ===================================================================
 .play_note
-    ; --- CHANNEL 0 (28 cycles) ---
-    clc                         ; 2
-    lda     ch0_acc_lo          ; 3
-    adc     ch0_div_lo          ; 3
-    sta     ch0_acc_lo          ; 3
-    lda     ch0_acc_hi          ; 3
-    adc     ch0_div_hi          ; 3
-    sta     ch0_acc_hi          ; 3
-    cmp     ch0_duty            ; 3 - sets carry if acc_hi >= duty
-    lda     #$00                ; 2
-    adc     #$00                ; 2 - A = carry (0 or 1)
+    ; === CH0 === 
+    lda     ch0_acc_lo
+    clc
+    adc     ch0_div_lo
+    sta     ch0_acc_lo
+    lda     ch0_acc_hi
+    adc     ch0_div_hi
+    sta     ch0_acc_hi
+    cmp     ch0_duty
+    lda     #$00
+    sbc     #$00
+    and     #$10
+    sta     $00
     
-    ; --- CHANNEL 1 (28 cycles) ---
-    tax                         ; 2 - save ch0 result
-    clc                         ; 2
-    lda     ch1_acc_lo          ; 3
-    adc     ch1_div_lo          ; 3
-    sta     ch1_acc_lo          ; 3
-    lda     ch1_acc_hi          ; 3
-    adc     ch1_div_hi          ; 3
-    sta     ch1_acc_hi          ; 3
-    cmp     ch1_duty            ; 3
-    lda     #$00                ; 2
-    adc     #$00                ; 2
+    ; === CH1 ===
+    lda     ch1_acc_lo
+    clc
+    adc     ch1_div_lo
+    sta     ch1_acc_lo
+    lda     ch1_acc_hi
+    adc     ch1_div_hi
+    sta     ch1_acc_hi
+    cmp     ch1_duty
+    lda     #$00
+    sbc     #$00
+    and     #$10
+    ora     $00
+    sta     $00
     
-    ; --- CHANNEL 2 (28 cycles) ---
-    ora     $00,x               ; 4 - OR with ch0 (using X as offset from $00)
-    tax                         ; 2 - save ch0|ch1 result
-    clc                         ; 2
-    lda     ch2_acc_lo          ; 3
-    adc     ch2_div_lo          ; 3
-    sta     ch2_acc_lo          ; 3
-    lda     ch2_acc_hi          ; 3
-    adc     ch2_div_hi          ; 3
-    sta     ch2_acc_hi          ; 3
-    cmp     ch2_duty            ; 3
-    lda     #$00                ; 2
-    adc     #$00                ; 2
+    ; === CH2 ===
+    lda     ch2_acc_lo
+    clc
+    adc     ch2_div_lo
+    sta     ch2_acc_lo
+    lda     ch2_acc_hi
+    adc     ch2_div_hi
+    sta     ch2_acc_hi
+    cmp     ch2_duty
+    lda     #$00
+    sbc     #$00
+    and     #$10
+    ora     $00
     
-    ; --- MIX & OUTPUT (12 cycles) ---
-    ora     $00,x               ; 4 - OR with ch0|ch1
-    tax                         ; 2 - save final mix
-    lda     volume_table,x      ; 4 - lookup volume (2 cycles saved!)
-    sta     SYSVIA_ORAS         ; 4
+    ; === OUTPUT ===
+    beq     silent
+    lda     #$90
+    equb    $2C
+.silent
+    lda     #$9F
+    sta     SYSVIA_ORAS
     
-    ; --- COUNTER DECREMENT (17 cycles) ---
-    ; Branch-free 16-bit decrement
-    lda     counter_lo          ; 3
-    bne     skip_hi_dec         ; 2/3
-    dec     counter_hi          ; 5
-    beq     row_finished        ; 2/3
-.skip_hi_dec
-    dec     counter_lo          ; 5
-    jmp     play_note           ; 3
+    ; === COUNTER ===
+    dex
+    bne     play_note
+    dey
+    bne     play_note
 
 .row_finished
     jmp     row
 
-; Volume lookup table - converts 0/1 to $9F/$90
-; This saves 6 cycles per sample vs branch!
-.volume_table
-    equb    $9F                 ; 0 = off (max attenuation)
-    equb    $90                 ; 1 = on (min attenuation)
-
 .s_print_hex
         pha
-        lsr     a
-        lsr     a
-        lsr     a
-        lsr     a
+        lsr a:lsr a:lsr a:lsr a
         jsr     printNybble
         pla
         and     #&0f
 .printNybble
-        sed
-        clc
+        sed:clc
         adc     #&90
         adc     #&40
         cld
