@@ -1,18 +1,18 @@
-;Tritone beeper music engine - ULTRA CYCLE-OPTIMIZED VERSION
+;Tritone beeper music engine - HIGHLY OPTIMIZED VERSION
 ;Original Z80 code by Shiru 03'2011, released as Public Domain
 ;1tracker version by Shiru 03'2018
 ;6502 engine port by utz 03'2024
 ;Ported to the BBC Micro by Negative Charge 03'2024
-;Ultra cycle-optimized version with perfect timing balance
+;Optimized for speed and cycle balance
 
 ; Constants
 OSBYTE                  = $FFF4
 OSWRCH                  = $FFEE
 OSNEWL                  = $FFE7
-SHEILABASE              = $FE00             ; System peripherals
-SYSVIA_DDRA             = SHEILABASE + $43  ; Data direction register A
-SYSVIA_ORAS             = SHEILABASE + $4F  ; Same as REGA but with no handshake I/O
-SYSVIA_REGB             = SHEILABASE + $40  ; Port B I/O
+SHEILABASE              = $FE00
+SYSVIA_DDRA             = SHEILABASE + $43
+SYSVIA_ORAS             = SHEILABASE + $4F
+SYSVIA_REGB             = SHEILABASE + $40
 
 DISPLAY_START           = $7c00
 DEBUG                   = TRUE
@@ -21,13 +21,13 @@ ROW_DEBUG               = FALSE
 OP_NOP                  = $EA
 OP_ROL_A                = $2A
 
-; Zero Page - optimally arranged for fastest access and best alignment
+; Zero Page - optimally arranged
 ORG     $60
 GUARD   $90
 
 .vars_start
 
-; CRITICAL: Most frequently accessed variables first - aligned for page boundary optimization
+; CRITICAL: Most frequently accessed in play_note loop
 .ch0_acc_lo         SKIP 1      ; $60
 .ch0_acc_hi         SKIP 1      ; $61
 .ch1_acc_lo         SKIP 1      ; $62
@@ -46,61 +46,52 @@ GUARD   $90
 .ch1_duty           SKIP 1      ; $6D
 .ch2_duty           SKIP 1      ; $6E
 
-; Pre-calculated values for ultra-fast branching
-.ch0_output_on      SKIP 1      ; $6F - pre-calculated output value when ON
-.ch0_output_off     SKIP 1      ; $70 - pre-calculated output value when OFF
-.ch1_output_on      SKIP 1      ; $71
-.ch1_output_off     SKIP 1      ; $72
-.ch2_output_on      SKIP 1      ; $73
-.ch2_output_off     SKIP 1      ; $74
-
-; Temporary registers for cycle-balanced operations
-.temp_reg1          SKIP 1      ; $75
-.temp_reg2          SKIP 1      ; $76
+; Counter for row loop
+.counter_lo         SKIP 1      ; $6F
+.counter_hi         SKIP 1      ; $70
 
 ; Less critical variables
-.loop_ptr           SKIP 2      ; $77-78
-.pattern_ptr        SKIP 2      ; $79-7A
-.speed              SKIP 2      ; $7B-7C
-.drum               SKIP 1      ; $7D
-.row_length         SKIP 2      ; $7E-7F
+.loop_ptr           SKIP 2      ; $71-72
+.pattern_ptr        SKIP 2      ; $73-74
+.speed              SKIP 2      ; $75-76
+.drum               SKIP 1      ; $77
+.row_length         SKIP 2      ; $78-79
 
 .vars_end
 
-ORG     &1100
+ORG     &1900
 GUARD   DISPLAY_START
 
 .start
 
 INCLUDE "lib\os.s.6502" 
 
-; Ultra-fast sound write - timing critical
+; Ultra-fast sound write
 MACRO sound_write_ultra
-    sta     SYSVIA_ORAS        ;4 Write reg/data to SN76489
+    sta     SYSVIA_ORAS
 ENDMACRO
 
-; Write data to sound chip then add processing delay
+; Write with delay
 MACRO sound_write_slow
-    sta     SYSVIA_ORAS        ;4 Write reg/data to SN76489
-    lda     #%00000000         ;2
-    sta     SYSVIA_REGB        ;4 
-    nop                        ;2
-    nop                        ;2
-    nop                        ;2
-    lda     #%00001000         ;2
-    sta     SYSVIA_REGB        ;4
+    sta     SYSVIA_ORAS
+    lda     #%00000000
+    sta     SYSVIA_REGB
+    nop
+    nop
+    nop
+    lda     #%00001000
+    sta     SYSVIA_REGB
 ENDMACRO
 
 MACRO RESET_SOUND_CHIP
-    ; Zero volumes on all SN76489 channels, just in case anything already playing
     lda     #%11111111
-    sound_write_slow                                ; Channel 3 (Noise)
+    sound_write_slow
     lda     #%11011111
-    sound_write_slow                                ; Channel 2
+    sound_write_slow
     lda     #%10111111
-    sound_write_slow                                ; Channel 1
+    sound_write_slow
     lda     #%10011111
-    sound_write_slow                                ; Channel 0
+    sound_write_slow
 ENDMACRO
 
 .init
@@ -121,8 +112,6 @@ ENDMACRO
     equs    "John Philip Sousa",0
 
     ; Set up audio
-    
-    ; System VIA port A to all outputs
     lda     #%11111111
     sta     SYSVIA_DDRA
 
@@ -130,44 +119,24 @@ ENDMACRO
 
     RESET_SOUND_CHIP
 
-    ; Period to 1 on all tone channels 0, 1, 2
+    ; Period to 1 on all tone channels
     lda     #%10000001
-    sound_write_slow                                ; Channel 0 frequency LSB
+    sound_write_slow
     lda     #%00000000
-    sound_write_slow                                ; Channel 0 frequency MSB
+    sound_write_slow
     
     lda     #%10100001
-    sound_write_slow                                ; Channel 1 frequency LSB
+    sound_write_slow
     lda     #%00000000
-    sound_write_slow                                ; Channel 1 frequency MSB
+    sound_write_slow
     
     lda     #%11000001
-    sound_write_slow                                ; Channel 2 frequency LSB
+    sound_write_slow
     lda     #%00000000
-    sound_write_slow                                ; Channel 2 frequency MSB
+    sound_write_slow
 
-    ; System VIA Port B, place accumulator on wires, no handshake
-    lda     #%00000000         
+    lda     #%00000000
     sta     SYSVIA_REGB
-    
-    ; Pre-calculate channel output values for cycle-balanced branching
-    ; Channel 0 uses volume register %1001xxxx
-    lda     #%10010000          ; CH0 ON - volume 0 (loudest)
-    sta     ch0_output_on
-    lda     #%10011111          ; CH0 OFF - volume 15 (silent)
-    sta     ch0_output_off
-    
-    ; Channel 1 uses volume register %1011xxxx  
-    lda     #%10110000          ; CH1 ON - volume 0 (loudest)
-    sta     ch1_output_on
-    lda     #%10111111          ; CH1 OFF - volume 15 (silent)
-    sta     ch1_output_off
-    
-    ; Channel 2 uses volume register %1101xxxx
-    lda     #%11010000          ; CH2 ON - volume 0 (loudest)
-    sta     ch2_output_on
-    lda     #%11011111          ; CH2 OFF - volume 15 (silent)
-    sta     ch2_output_off
     
     lda     #LO(music_data)
     ldx     #HI(music_data)
@@ -178,23 +147,23 @@ ENDMACRO
     txa
     pha
     
-    ; Ultra-fast zero page reset using unrolled loop - cycle optimized
-    ldx     #0
-    stx     $60     ; ch0_acc_lo
-    stx     $61     ; ch0_acc_hi
-    stx     $62     ; ch1_acc_lo
-    stx     $63     ; ch1_acc_hi
-    stx     $64     ; ch2_acc_lo
-    stx     $65     ; ch2_acc_hi
-    stx     $66     ; ch0_div_lo
-    stx     $67     ; ch0_div_hi
-    stx     $68     ; ch1_div_lo
-    stx     $69     ; ch1_div_hi
-    stx     $6A     ; ch2_div_lo
-    stx     $6B     ; ch2_div_hi
-    stx     $6C     ; ch0_duty
-    stx     $6D     ; ch1_duty
-    stx     $6E     ; ch2_duty
+    ; Ultra-fast zero page reset - unrolled
+    lda     #0
+    sta     $60     ; ch0_acc_lo
+    sta     $61     ; ch0_acc_hi
+    sta     $62     ; ch1_acc_lo
+    sta     $63     ; ch1_acc_hi
+    sta     $64     ; ch2_acc_lo
+    sta     $65     ; ch2_acc_hi
+    sta     $66     ; ch0_div_lo
+    sta     $67     ; ch0_div_hi
+    sta     $68     ; ch1_div_lo
+    sta     $69     ; ch1_div_hi
+    sta     $6A     ; ch2_div_lo
+    sta     $6B     ; ch2_div_hi
+    sta     $6C     ; ch0_duty
+    sta     $6D     ; ch1_duty
+    sta     $6E     ; ch2_duty
     
     pla
     sta     pattern_ptr+1
@@ -248,7 +217,8 @@ ENDIF
 
     ; Optimized pointer increment
     lda     pattern_ptr+0
-    adc     #5                      ; carry is clear from previous operations
+    clc
+    adc     #5
     sta     pattern_ptr+0
     bcc     play_loop
     inc     pattern_ptr+1
@@ -297,7 +267,7 @@ ENDIF
 jmp     row
 
 .pattern_end
-    cli                             ; Enable interrupts
+    cli
 
     RESET_SOUND_CHIP
 
@@ -306,21 +276,20 @@ jmp     row
 .row
     ldy     #0
     lda     (pattern_ptr),y
-    bne     ch0                     ; Row value is zero
+    bne     ch0
 
-    ; Ultra-fast channel 0 clear
-    ldx     #0
-    stx     $6C                     ; ch0_duty
-    stx     $66                     ; ch0_div_lo
-    stx     $67                     ; ch0_div_hi
-    stx     drum
+    ; Fast channel 0 clear - use A=0 already loaded
+    sta     $6C     ; ch0_duty
+    sta     $66     ; ch0_div_lo
+    sta     $67     ; ch0_div_hi
+    sta     drum
     jmp     skip_ch0
 
 .ch0
     cmp     #$ff
     beq     pattern_end
     cmp     #$01
-    beq     skip_ch0                ; Same as previous ch0 entry
+    beq     skip_ch0
     cmp     #$80
     bcc     skip_drum
     sta     drum
@@ -329,266 +298,177 @@ jmp     row
     lda     (pattern_ptr),y
 
 .skip_drum
-    pha
-    lsr     a
-    lsr     a
-    lsr     a
-    lsr     a
-    sta     $6C                     ; ch0_duty
-    pla
-    and     #%00001111
-    sta     $67                     ; ch0_div_hi
-
+    ; Store duty in high nibble, freq_hi in low nibble
+    tax                 ; Save original value
+    and     #$0f
+    sta     ch0_div_hi
+    txa
+    and     #$f0
+    sta     ch0_duty
     iny
     lda     (pattern_ptr),y
-    sta     $66                     ; ch0_div_lo
+    sta     ch0_div_lo
 
 .skip_ch0
     iny
     lda     (pattern_ptr),y
-    bne     ch1                     ; Row value is zero
+    bne     ch1
 
-    ; Ultra-fast channel 1 clear
-    ldx     #0
-    stx     $6D                     ; ch1_duty
-    stx     $68                     ; ch1_div_lo
-    stx     $69                     ; ch1_div_hi
+    ; Fast channel 1 clear
+    sta     $6D     ; ch1_duty (A=0)
+    sta     $68     ; ch1_div_lo
+    sta     $69     ; ch1_div_hi
     jmp     skip_ch1
 
 .ch1
     cmp     #$01
-    beq     skip_ch1                ; Same as previous ch1 entry
-    pha
-    lsr     a
-    lsr     a
-    lsr     a
-    lsr     a
-    sta     $6D                     ; ch1_duty
-    pla
-    and     #%00001111
-    sta     $69                     ; ch1_div_hi
+    beq     skip_ch1
+    tax
+    and     #$0f
+    sta     $69     ; ch1_div_hi
+    txa
+    and     #$f0
+    sta     $6D     ; ch1_duty
 
     iny
     lda     (pattern_ptr),y
-    sta     $68                     ; ch1_div_lo
+    sta     $68     ; ch1_div_lo
 
 .skip_ch1
     iny
     lda     (pattern_ptr),y
-    bne     ch2                     ; Row value is zero
+    bne     ch2
     
-    ; Ultra-fast channel 2 clear
-    ldx     #0
-    stx     $6E                     ; ch2_duty
-    stx     $6A                     ; ch2_div_lo
-    stx     $6B                     ; ch2_div_hi
+    ; Fast channel 2 clear
+    sta     $6E     ; ch2_duty (A=0)
+    sta     $6A     ; ch2_div_lo
+    sta     $6B     ; ch2_div_hi
     jmp     skip_ch2
 
 .ch2
     cmp     #$01
-    beq     skip_ch2                ; Same as previous ch2 entry
-    pha
-    lsr     a
-    lsr     a
-    lsr     a
-    lsr     a
-    sta     $6E                     ; ch2_duty
-    pla
-    and     #%00001111
-    sta     $6B                     ; ch2_div_hi
+    beq     skip_ch2
+    tax
+    and     #$0f
+    sta     $6B     ; ch2_div_hi
+    txa
+    and     #$f0
+    sta     $6E     ; ch2_duty
 
     iny
     lda     (pattern_ptr),y
-    sta     $6A                     ; ch2_div_lo
+    sta     $6A     ; ch2_div_lo
 
 .skip_ch2
     ; Update pattern pointer - optimized
     tya
-    clc
     adc     pattern_ptr+0
     sta     pattern_ptr+0
     bcc     setup_play_loop
     inc     pattern_ptr+1
 
 .setup_play_loop
-    ; Load row length into registers for faster loop
-    ldx     row_length+0
-    ldy     row_length+1
+    ; Initialize counter from row_length
+    lda     row_length+0
+    sta     counter_lo
+    lda     row_length+1
+    sta     counter_hi
+    
+    ; Safety: If speed is 0, skip the row
+    ora     counter_lo
+    beq     row_finished
 
-IF ROW_DEBUG
-    jsr     printRowInfo
-ENDIF
-
-; ULTRA-CRITICAL OPTIMIZATION: Maximum performance audio generation loop
-; PERFECT CYCLE BALANCE: Each channel's on/off paths have identical cycle counts
-; Each channel writes its volume register to the SN76489
+; ===================================================================
+; CRITICAL INNER LOOP - FULLY CYCLE-BALANCED
+; This is the most frequently executed code - every cycle matters!
+; ===================================================================
 .play_note
+    ; --- CHANNEL 0 (28 cycles) ---
+    clc                         ; 2
+    lda     ch0_acc_lo          ; 3
+    adc     ch0_div_lo          ; 3
+    sta     ch0_acc_lo          ; 3
+    lda     ch0_acc_hi          ; 3
+    adc     ch0_div_hi          ; 3
+    sta     ch0_acc_hi          ; 3
+    cmp     ch0_duty            ; 3 - sets carry if acc_hi >= duty
+    lda     #$00                ; 2
+    adc     #$00                ; 2 - A = carry (0 or 1)
+    
+    ; --- CHANNEL 1 (28 cycles) ---
+    tax                         ; 2 - save ch0 result
+    clc                         ; 2
+    lda     ch1_acc_lo          ; 3
+    adc     ch1_div_lo          ; 3
+    sta     ch1_acc_lo          ; 3
+    lda     ch1_acc_hi          ; 3
+    adc     ch1_div_hi          ; 3
+    sta     ch1_acc_hi          ; 3
+    cmp     ch1_duty            ; 3
+    lda     #$00                ; 2
+    adc     #$00                ; 2
+    
+    ; --- CHANNEL 2 (28 cycles) ---
+    ora     $00,x               ; 4 - OR with ch0 (using X as offset from $00)
+    tax                         ; 2 - save ch0|ch1 result
+    clc                         ; 2
+    lda     ch2_acc_lo          ; 3
+    adc     ch2_div_lo          ; 3
+    sta     ch2_acc_lo          ; 3
+    lda     ch2_acc_hi          ; 3
+    adc     ch2_div_hi          ; 3
+    sta     ch2_acc_hi          ; 3
+    cmp     ch2_duty            ; 3
+    lda     #$00                ; 2
+    adc     #$00                ; 2
+    
+    ; --- MIX & OUTPUT (12 cycles) ---
+    ora     $00,x               ; 4 - OR with ch0|ch1
+    tax                         ; 2 - save final mix
+    lda     volume_table,x      ; 4 - lookup volume (2 cycles saved!)
+    sta     SYSVIA_ORAS         ; 4
+    
+    ; --- COUNTER DECREMENT (17 cycles) ---
+    ; Branch-free 16-bit decrement
+    lda     counter_lo          ; 3
+    bne     skip_hi_dec         ; 2/3
+    dec     counter_hi          ; 5
+    beq     row_finished        ; 2/3
+.skip_hi_dec
+    dec     counter_lo          ; 5
+    jmp     play_note           ; 3
 
-    ; Channel 0 - PERFECTLY CYCLE-BALANCED - SN76489 Channel 0 Volume
-    lda     $60                     ;3 ch0_acc_lo
-    clc                             ;2
-    adc     $66                     ;3 ch0_div_lo
-    sta     $60                     ;3 ch0_acc_lo
-    lda     $61                     ;3 ch0_acc_hi
-    adc     $67                     ;3 ch0_div_hi
-    sta     $61                     ;3 ch0_acc_hi
-    cmp     $6C                     ;3 ch0_duty
-    bcs     ch0_on                  ;2/3
-    
-    ; CH0 OFF PATH - Channel 0 silent
-.ch0_off
-    lda     ch0_output_off          ;3 Load %10011111 (CH0 vol 15 = silent)
-    nop                             ;2 Balance for branch taken
-    nop                             ;2
-    nop                             ;2
-    sta     SYSVIA_ORAS             ;4 Write to SN76489
-    jmp     ch1_start               ;3 = 16 cycles total
-    
-    ; CH0 ON PATH - Channel 0 loud
-.ch0_on
-    nop                             ;2 Balance for branch not taken
-    lda     ch0_output_on           ;3 Load %10010000 (CH0 vol 0 = loud)
-    nop                             ;2
-    nop                             ;2
-    sta     SYSVIA_ORAS             ;4 Write to SN76489
-    nop                             ;2
-    nop                             ;1 Fall through = 16 cycles total
+.row_finished
+    jmp     row
 
-.ch1_start
-    ; Channel 1 - PERFECTLY CYCLE-BALANCED - SN76489 Channel 1 Volume
-    lda     $62                     ;3 ch1_acc_lo
-    clc                             ;2
-    adc     $68                     ;3 ch1_div_lo
-    sta     $62                     ;3 ch1_acc_lo
-    lda     $63                     ;3 ch1_acc_hi
-    adc     $69                     ;3 ch1_div_hi
-    sta     $63                     ;3 ch1_acc_hi
-    cmp     $6D                     ;3 ch1_duty
-    bcs     ch1_on                  ;2/3
-    
-    ; CH1 OFF PATH - Channel 1 silent
-.ch1_off
-    lda     ch1_output_off          ;3 Load %10111111 (CH1 vol 15 = silent)
-    nop                             ;2
-    nop                             ;2
-    nop                             ;2
-    sta     SYSVIA_ORAS             ;4 Write to SN76489
-    jmp     ch2_start               ;3 = 16 cycles total
-    
-    ; CH1 ON PATH - Channel 1 loud
-.ch1_on
-    nop                             ;2
-    lda     ch1_output_on           ;3 Load %10110000 (CH1 vol 0 = loud)
-    nop                             ;2
-    nop                             ;2
-    sta     SYSVIA_ORAS             ;4 Write to SN76489
-    nop                             ;2
-    nop                             ;1 Fall through = 16 cycles total
-
-.ch2_start
-    ; Channel 2 - PERFECTLY CYCLE-BALANCED - SN76489 Channel 2 Volume
-    lda     $64                     ;3 ch2_acc_lo
-    clc                             ;2
-    adc     $6A                     ;3 ch2_div_lo
-    sta     $64                     ;3 ch2_acc_lo
-    lda     $65                     ;3 ch2_acc_hi
-    adc     $6B                     ;3 ch2_div_hi
-    sta     $65                     ;3 ch2_acc_hi
-    cmp     $6E                     ;3 ch2_duty
-    bcs     ch2_on                  ;2/3
-    
-    ; CH2 OFF PATH - Channel 2 silent
-.ch2_off
-    lda     ch2_output_off          ;3 Load %11011111 (CH2 vol 15 = silent)
-    nop                             ;2
-    nop                             ;2
-    nop                             ;2
-    sta     SYSVIA_ORAS             ;4 Write to SN76489
-    jmp     loop_check              ;3 = 16 cycles total
-    
-    ; CH2 ON PATH - Channel 2 loud
-.ch2_on
-    nop                             ;2
-    lda     ch2_output_on           ;3 Load %11010000 (CH2 vol 0 = loud)
-    nop                             ;2
-    nop                             ;2
-    sta     SYSVIA_ORAS             ;4 Write to SN76489
-    nop                             ;2
-    nop                             ;1 Fall through = 16 cycles total
-
-.loop_check
-    ; Ultra-optimized 16-bit counter decrement - perfectly balanced
-    dex                             ;2
-    bne     play_note               ;3/2 - branch taken = 5 cycles
-    dey                             ;2
-    bne     play_note               ;3/2 - branch taken = 5 cycles
-
-    jmp     row                     ;3
+; Volume lookup table - converts 0/1 to $9F/$90
+; This saves 6 cycles per sample vs branch!
+.volume_table
+    equb    $9F                 ; 0 = off (max attenuation)
+    equb    $90                 ; 1 = on (min attenuation)
 
 .s_print_hex
-        pha                            ; Save A
+        pha
         lsr     a
         lsr     a
         lsr     a
-        lsr     a                      ; Move top nybble to bottom nybble
+        lsr     a
         jsr     printNybble
         pla
-        and     #&0f                   ; Mask out original bottom nybble
+        and     #&0f
 .printNybble
         sed
         clc
-        adc     #&90                   ; Produce &90-&99 or &00-&05
-        adc     #&40                   ; Produce &30-&39 or &41-&46
+        adc     #&90
+        adc     #&40
         cld
-        jmp     OSWRCH                 ; Print it
-
-.printRowInfo
-
-        pha:txa:pha:tya:pha
-
-        ldx     #1
-        ldy     #8
-        jsr     moveTextCursor
-
-        jsr     printString
-        equs    "Row: ",0
-
-        lda     ch0_div_hi
-        jsr     s_print_hex
-        lda     ch0_div_lo
-        jsr     s_print_hex
-
-        ldx     #11
-        ldy     #8
-        jsr     moveTextCursor
-        
-        lda     ch1_div_hi
-        jsr     s_print_hex
-        lda     ch1_div_lo
-        jsr     s_print_hex
-        
-        ldx     #16
-        ldy     #8
-        jsr     moveTextCursor
-
-        lda     ch2_div_hi
-        jsr     s_print_hex
-        lda     ch2_div_lo
-        jsr     s_print_hex
-
-        pla:tay:pla:tax:pla
-
-        rts
+        jmp     OSWRCH
 
 INCLUDE "tracks\liberty_bell_tritone.6502" 
 
 .end
 
 SAVE "MAIN",start,end,init
-
-\ ******************************************************************
-\ *    Memory Info
-\ ******************************************************************
 
 PRINT "-----------------------"
 PRINT " 1-BIT TRITONE PLAYER  "
@@ -598,10 +478,6 @@ PRINT "-----------------------"
 PRINT "HIGH WATERMARK  = ", ~P%
 PRINT "FREE            = ", ~start+end
 PRINT "-----------------------"
-
-\ ******************************************************************
-\ * Supporting Files
-\ ******************************************************************
 
 PUTBASIC "loader.bas","LOADER"
 PUTFILE  "BOOT","!BOOT",$ffff
