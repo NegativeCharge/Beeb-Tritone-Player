@@ -1,9 +1,7 @@
-;Tritone beeper music engine - CAREFULLY OPTIMIZED
+;Tritone beeper music engine
 ;Original Z80 code by Shiru 03'2011
 ;6502 engine port by utz 03'2024
 ;BBC Micro port by Negative Charge 03'2024
-;Cycle optimization to ~141 cycles/iteration (was ~153)
-;NOTE: Near theoretical minimum without algorithm changes
 
 ; Constants
 OSBYTE                  = $FFF4
@@ -17,7 +15,7 @@ SYSVIA_REGB             = SHEILABASE + $40
 DISPLAY_START           = $7c00
 DEBUG                   = FALSE
 
-; Zero Page - REORGANIZED for optimization
+; Zero Page
 ORG     $60
 GUARD   $90
 
@@ -41,7 +39,7 @@ GUARD   $90
 .ch1_duty           SKIP 1
 .ch2_duty           SKIP 1
 
-.temp_output        SKIP 1      ; Needed for correct mixing
+.temp_output        SKIP 1
 
 .loop_ptr           SKIP 2
 .pattern_ptr        SKIP 2
@@ -292,12 +290,8 @@ ENDMACRO
     ldx     row_length+0
     ldy     row_length+1
 
-; ========================================================================
-; OPTIMIZED AUDIO GENERATION LOOP - ~141 cycles (was ~153)
-; Saved 12 cycles by removing redundant operations
-; ========================================================================
 .play_note
-    ; CH0 - 25 cycles (saved 3: removed lda #0 before sbc)
+    ; CH0
     lda     ch0_acc_lo          ; 3
     adc     ch0_div_lo          ; 3
     sta     ch0_acc_lo          ; 3
@@ -308,9 +302,8 @@ ENDMACRO
     lda     #$00                ; 2
     sbc     #$00                ; 2 - A = $00 if carry, $FF if !carry
     sta     temp_output         ; 3
-    ; Subtotal: 28 cycles (same as original)
     
-    ; CH1 - 26 cycles (saved 2: removed redundant lda #0)
+    ; CH1
     lda     ch1_acc_lo          ; 3
     adc     ch1_div_lo          ; 3
     sta     ch1_acc_lo          ; 3
@@ -322,9 +315,8 @@ ENDMACRO
     sbc     #$00                ; 2
     ora     temp_output         ; 3 - mix CH0 | CH1
     sta     temp_output         ; 3
-    ; Subtotal: 28 cycles (same as original)
     
-    ; CH2 - 23 cycles (saved 5: removed lda #0 and final store)
+    ; CH2
     lda     ch2_acc_lo          ; 3
     adc     ch2_div_lo          ; 3
     sta     ch2_acc_lo          ; 3
@@ -335,10 +327,7 @@ ENDMACRO
     lda     #$00                ; 2
     sbc     #$00                ; 2
     ora     temp_output         ; 3 - final mix (A = CH0 | CH1 | CH2)
-    ; No store needed - use A directly
-    ; Subtotal: 25 cycles (was 28, saved 3)
     
-    ; Output - 13 cycles (saved 7: removed AND, simplified branching)
     bne     play_sound          ; 2/3
     lda     #$9F                ; 2 - silent
     bne     play_output         ; 3 (always branches)
@@ -346,19 +335,11 @@ ENDMACRO
     lda     #$90                ; 2 - sound
 .play_output
     sta     SYSVIA_ORAS         ; 4
-    ; Subtotal: 13 cycles (was 20, saved 7)
-    ; Note: AND removed because $9F AND $9F=$9F and $90 AND $9F=$90
-    
-    ; Loop counter - 7 cycles
     dex                         ; 2
     bne     play_note           ; 3
     dey                         ; 2
     bne     play_note           ; 3
     
-; Total inner loop: ~141 cycles (was ~153)
-; Savings: 12 cycles per iteration = ~7.8% faster
-; ========================================================================
-
 .row_finished
     jmp     row
 
