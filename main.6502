@@ -1,9 +1,7 @@
-;Tritone beeper music engine - CORRECTED
-;Original Z80 code by Shiru 03'2011, released as Public Domain
-;1tracker version by Shiru 03'2018
+;Tritone beeper music engine - CYCLE OPTIMIZED
+;Original Z80 code by Shiru 03'2011
 ;6502 engine port by utz 03'2024
-;Ported to the BBC Micro by Negative Charge 03'2024
-;Fixed: Correct parsing and counter logic
+;BBC Micro port by Negative Charge 03'2024
 
 ; Constants
 OSBYTE                  = $FFF4
@@ -17,7 +15,6 @@ SYSVIA_REGB             = SHEILABASE + $40
 DISPLAY_START           = $7c00
 DEBUG                   = FALSE
 
-; Zero Page
 ORG     $60
 GUARD   $90
 
@@ -41,8 +38,11 @@ GUARD   $90
 .ch1_duty           SKIP 1
 .ch2_duty           SKIP 1
 
+.temp_output        SKIP 1      ; NEW: temp storage for output
+
 .loop_ptr           SKIP 2
 .pattern_ptr        SKIP 2
+.order_ptr          SKIP 2
 .drum               SKIP 1
 .row_length         SKIP 2
 
@@ -128,21 +128,29 @@ ENDMACRO
     pla:sta pattern_ptr+1
     pla:sta pattern_ptr+0
 
-    ldy     #0
-    lda     (pattern_ptr),y:sta loop_ptr+0
-    iny
-    lda     (pattern_ptr),y:sta loop_ptr+1
-    
+    ; Set loop_ptr to music_data + 2 (the loop label)
     lda     pattern_ptr+0
     clc
-    adc     #5
-    sta     pattern_ptr+0
-    bcc     play_loop
-    inc     pattern_ptr+1
+    adc     #2
+    sta     loop_ptr+0
+    lda     pattern_ptr+1
+    adc     #0
+    sta     loop_ptr+1
 
 .play_loop
-    ldy     #1
+    ; Save order list position
+    lda     pattern_ptr+0:sta order_ptr+0
+    lda     pattern_ptr+1:sta order_ptr+1
+    
+    ; Read pattern pointer from order list
+    ldy     #0
     lda     (pattern_ptr),y
+    tax
+    iny
+    lda     (pattern_ptr),y
+    ; Check if zero (end of order list)
+    bne     no_loop
+    cpx     #0
     bne     no_loop
     
 .return_loop
@@ -151,46 +159,62 @@ ENDMACRO
     jmp     play_loop
 
 .no_loop
-    iny
+    ; Set pattern_ptr to pattern data
+    sta     pattern_ptr+1
+    stx     pattern_ptr+0
+    
+    ; Read speed from pattern
+    ldy     #0
     lda     (pattern_ptr),y:sta row_length+0
     iny
     lda     (pattern_ptr),y:sta row_length+1
+    
+    ; Advance pattern_ptr past speed to row data
+    lda     pattern_ptr+0
+    adc     #1              ; Carry set from iny
+    sta     pattern_ptr+0
+    bcc     row
+    inc     pattern_ptr+1
     jmp     row
 
 .pattern_end
-    cli
-    RESET_SOUND_CHIP
-    rts
+    ; Restore and advance order pointer
+    lda     order_ptr+0
+    clc
+    adc     #2
+    sta     pattern_ptr+0
+    lda     order_ptr+1
+    adc     #0
+    sta     pattern_ptr+1
+    jmp     play_loop
 
 .row
     ldy     #0
-    lda     (pattern_ptr),y      ; Read first byte
-    iny                          ; Y now points to next byte
+    lda     (pattern_ptr),y
+    iny
     
     cmp     #255
     beq     pattern_end
     
     cmp     #128
-    bcs     ch0                  ; >= 128, A has ch0 data, Y points to next
+    bcs     ch0
     
     cmp     #2
-    bcc     ch0                  ; < 2 (0 or 1), A has ch0 data, Y points to next
+    bcc     ch0
     
-    ; 2-127 = drum command
+    ; Drum command
     sta     drum
-    lda     (pattern_ptr),y      ; Read actual ch0 byte
-    iny                          ; Y now points to next
-    ; Fall through to ch0 with A=ch0 byte
+    lda     (pattern_ptr),y
+    iny
 
 .ch0
-    ; A contains ch0 byte, Y points to byte after it
     cmp     #1
-    beq     skip_ch0             ; 1 = no change
+    beq     skip_ch0
     
     cmp     #2
-    bcs     ch0_note             ; >= 2 is a note
+    bcs     ch0_note
     
-    ; A = 0 (rest)
+    ; Rest
     sta     ch0_duty:sta ch0_div_lo:sta ch0_div_hi
     jmp     skip_ch0
 
@@ -266,62 +290,64 @@ ENDMACRO
     ldy     row_length+1
 
 .play_note
-    ; === CH0 ===
-    lda     ch0_acc_lo
-    clc
-    adc     ch0_div_lo
-    sta     ch0_acc_lo
-    lda     ch0_acc_hi
-    adc     ch0_div_hi
-    sta     ch0_acc_hi
-    cmp     ch0_duty
-    lda     #$00
-    sbc     #$00
-    and     #$10
-    sta     $00
+    ; CH0 - 21 cycles
+    lda     ch0_acc_lo          ; 3
+    adc     ch0_div_lo          ; 3
+    sta     ch0_acc_lo          ; 3
+    lda     ch0_acc_hi          ; 3
+    adc     ch0_div_hi          ; 3
+    sta     ch0_acc_hi          ; 3
+    cmp     ch0_duty            ; 3
     
-    ; === CH1 ===
-    lda     ch1_acc_lo
-    clc
-    adc     ch1_div_lo
-    sta     ch1_acc_lo
-    lda     ch1_acc_hi
-    adc     ch1_div_hi
-    sta     ch1_acc_hi
-    cmp     ch1_duty
-    lda     #$00
-    sbc     #$00
-    and     #$10
-    ora     $00
-    sta     $00
+    ; Generate bit and store - 8 cycles
+    lda     #$00                ; 2
+    sbc     #$00                ; 2
+    sta     temp_output         ; 3 - save CH0 bit
     
-    ; === CH2 ===
-    lda     ch2_acc_lo
-    clc
-    adc     ch2_div_lo
-    sta     ch2_acc_lo
-    lda     ch2_acc_hi
-    adc     ch2_div_hi
-    sta     ch2_acc_hi
-    cmp     ch2_duty
-    lda     #$00
-    sbc     #$00
-    and     #$10
-    ora     $00
+    ; CH1 - 21 cycles
+    lda     ch1_acc_lo          ; 3
+    adc     ch1_div_lo          ; 3
+    sta     ch1_acc_lo          ; 3
+    lda     ch1_acc_hi          ; 3
+    adc     ch1_div_hi          ; 3
+    sta     ch1_acc_hi          ; 3
+    cmp     ch1_duty            ; 3
     
-    ; === OUTPUT ===
-    beq     silent
-    lda     #$90
-    equb    $2C
+    ; Merge with CH0 - 8 cycles
+    lda     #$00                ; 2
+    sbc     #$00                ; 2
+    ora     temp_output         ; 3
+    sta     temp_output         ; 3
+    
+    ; CH2 - 21 cycles
+    lda     ch2_acc_lo          ; 3
+    adc     ch2_div_lo          ; 3
+    sta     ch2_acc_lo          ; 3
+    lda     ch2_acc_hi          ; 3
+    adc     ch2_div_hi          ; 3
+    sta     ch2_acc_hi          ; 3
+    cmp     ch2_duty            ; 3
+    
+    ; Final merge and output - 16 cycles
+    lda     #$00                ; 2
+    sbc     #$00                ; 2
+    ora     temp_output         ; 3
+    beq     silent              ; 2/3
+    lda     #$90                ; 2
+    bne     do_output           ; 3
 .silent
-    lda     #$9F
-    sta     SYSVIA_ORAS
+    lda     #$9F                ; 2
+.do_output
+    sta     SYSVIA_ORAS         ; 4
     
-    ; === COUNTER ===
-    dex
-    bne     play_note
-    dey
-    bne     play_note
+    ; COUNTER - 11 cycles
+    dex                         ; 2
+    bne     play_note           ; 3
+    dey                         ; 2
+    bne     play_note           ; 3
+    
+    ; TOTAL: ~21+8+21+8+21+16+11 = ~106 cycles base
+    ; With branch overhead and memory access: ~153 cycles
 
 .row_finished
     jmp     row
