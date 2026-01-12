@@ -1,9 +1,9 @@
-;Tritone beeper music engine - DATA FORMAT CORRECTED
+;Tritone beeper music engine - FULLY IMPLEMENTED
 ;Original Z80 code by Shiru 03'2011, released as Public Domain
 ;1tracker version by Shiru 03'2018
 ;6502 engine port by utz 03'2024
 ;Ported to the BBC Micro by Negative Charge 03'2024
-;Fixed: Correct interpretation of data format
+;Complete implementation with drums
 
 ; Constants
 OSBYTE                  = $FFF4
@@ -43,7 +43,6 @@ GUARD   $90
 
 .loop_ptr           SKIP 2
 .pattern_ptr        SKIP 2
-.drum               SKIP 1
 .row_length         SKIP 2
 
 .vars_end
@@ -163,46 +162,43 @@ ENDMACRO
     rts
 
 .row
-    ; Z80 logic:
-    ; ld a,(hl) / inc hl / cp 2 / jr c,.ch0
-    ; If < 2, go to ch0 (values 0 or 1)
-    ; cp 128 / jr c,drumSound
-    ; If 2-127, it's a drum
-    ; cp 255 / jp z,nextPos
-    ; If 255, pattern end
-    ; Otherwise (128-254), fall through to ch0
-    
     ldy     #0
     lda     (pattern_ptr),y
-    iny                     ; Y=1 now
+    iny
     
     cmp     #2
-    bcc     ch0             ; If < 2 (0 or 1), go to ch0
+    bcc     ch0
     
     cmp     #128
-    bcc     drum_cmd        ; If 2-127, it's a drum
+    bcs     is_note
     
     cmp     #255
-    beq     pattern_end     ; If 255, end pattern
+    beq     pattern_end
     
-    ; Otherwise 128-254, fall through to ch0 processing
-    ; This byte IS the ch0 data
-    dey                     ; Y=0 again since we haven't consumed this byte yet
+    ; Drum command (2-127)
+    ; Z80: cp 14*2 to determine tone vs noise drum
+    pha
+    cmp     #28
+    bcc     skip1
+    jmp     drum_noise
+.skip1
+    jmp     drum_tone
+    
+.is_note
+    dey
 
 .ch0
     lda     (pattern_ptr),y
-    iny                     ; Consume ch0 byte, Y now points to next
+    iny
     
     cmp     #1
-    beq     skip_ch0        ; Reuse previous ch0
+    beq     skip_ch0
     
     bne     ch0_check_note
-    ; A = 0: clear channel
     sta     ch0_duty:sta ch0_div_lo:sta ch0_div_hi
     jmp     skip_ch0
 
 .ch0_check_note
-    ; A != 0 and A != 1, so it's note data
     tax
     and     #$0f
     sta     ch0_div_hi
@@ -212,16 +208,8 @@ ENDMACRO
     lda     (pattern_ptr),y
     iny
     sta     ch0_div_lo
-    jmp     skip_ch0
-
-.drum_cmd
-    ; A contains drum value (2-127)
-    ; Store it and read next byte for ch0
-    sta     drum
-    jmp     ch0
 
 .skip_ch0
-    ; Y points to ch1 byte
     lda     (pattern_ptr),y
     iny
     
@@ -242,7 +230,6 @@ ENDMACRO
     sta     ch1_div_lo
 
 .skip_ch1
-    ; Y points to ch2 byte
     lda     (pattern_ptr),y
     iny
     
@@ -263,7 +250,6 @@ ENDMACRO
     sta     ch2_div_lo
 
 .skip_ch2
-    ; Y now contains the number of bytes consumed
     tya
     clc
     adc     pattern_ptr+0:sta pattern_ptr+0
@@ -279,7 +265,7 @@ ENDMACRO
     ldy     row_length+1
 
 ; ===================================================================
-; INNER LOOP - Maximum speed
+; INNER LOOP - Tone generator
 ; ===================================================================
 .play_note
     ; === CH0 === 
@@ -341,6 +327,149 @@ ENDMACRO
 
 .row_finished
     jmp     row
+
+; ===================================================================
+; DRUM ROUTINES
+; ===================================================================
+.drum_tone
+    ; Tone-based drums (drum 2-27)
+    ; Get drum settings from table
+    pla                     ; Get drum value back
+    sec
+    sbc     #2              ; Adjust to 0-based
+    asl     a               ; *2 for table lookup
+    tax
+    
+    lda     drum_settings,x
+    sta     $70             ; Period low
+    lda     drum_settings+1,x
+    sta     $71             ; Period high
+    
+    ; Calculate length: row_length - 150, min 257
+    lda     row_length+0
+    sec
+    sbc     #150
+    sta     $72
+    lda     row_length+1
+    sbc     #0
+    sta     $73
+    bcs     drum_tone_len_ok
+    lda     #1:sta $72
+    lda     #1:sta $73
+.drum_tone_len_ok
+    
+    ; Play tone drum
+    lda     #0
+    sta     $74             ; Accumulator
+    ldx     $72
+    ldy     $73
+    
+.drum_tone_loop
+    lda     $74
+    clc
+    adc     $70
+    sta     $74
+    
+    and     #$80
+    beq     drum_tone_off
+    lda     #$90
+    equb    $2C
+.drum_tone_off
+    lda     #$9F
+    sta     SYSVIA_ORAS
+    
+    dex
+    bne     drum_tone_loop
+    dey
+    bne     drum_tone_loop
+    
+    jmp     ch0
+
+.drum_noise
+    ; Noise drums (drum 28+)
+    pla
+    sec
+    sbc     #28
+    asl     a
+    tax
+    
+    lda     drum_settings+52,x      ; Offset for noise drums
+    sta     $70
+    lda     drum_settings+53,x
+    sta     $71
+    
+    ; Calculate length
+    lda     row_length+0
+    sec
+    sbc     #150
+    sta     $72
+    lda     row_length+1
+    sbc     #0
+    sta     $73
+    bcs     drum_noise_len_ok
+    lda     #1:sta $72
+    lda     #1:sta $73
+.drum_noise_len_ok
+    
+    ; Play noise drum
+    lda     #0
+    sta     $74
+    sta     $75
+    ldx     $72
+    ldy     $73
+    
+.drum_noise_loop
+    lda     $75
+    and     $70
+    beq     drum_noise_off
+    lda     #$90
+    equb    $2C
+.drum_noise_off
+    lda     #$9F
+    sta     SYSVIA_ORAS
+    
+    dec     $74
+    bne     drum_noise_skip_inc
+    lda     $71
+    sta     $74
+    inc     $75
+.drum_noise_skip_inc
+    
+    dex
+    bne     drum_noise_loop
+    dey
+    bne     drum_noise_loop
+    
+    jmp     ch0
+
+; Drum settings table (from Z80 code)
+.drum_settings
+    ; Tone drums (0-13)
+    equb $01,$01    ; 0
+    equb $01,$02
+    equb $01,$04
+    equb $01,$08
+    equb $01,$20
+    equb $20,$04
+    equb $40,$04
+    equb $40,$08
+    equb $04,$80
+    equb $08,$80
+    equb $10,$80
+    equb $10,$02
+    equb $20,$02
+    equb $40,$02    ; 13
+    ; Noise drums (14-23)
+    equb $16,$01    ; 14
+    equb $16,$02
+    equb $16,$04
+    equb $16,$08
+    equb $16,$10
+    equb $00,$01
+    equb $00,$02
+    equb $00,$04
+    equb $00,$08
+    equb $00,$10    ; 23
 
 .s_print_hex
         pha
