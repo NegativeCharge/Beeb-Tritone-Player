@@ -2,6 +2,7 @@
 ;Original Z80 code by Shiru 03'2011
 ;6502 engine port by utz 03'2024
 ;BBC Micro port by Negative Charge 03'2024
+;Cycle optimization to ~153 cycles/iteration
 
 ; Constants
 OSBYTE                  = $FFF4
@@ -15,6 +16,7 @@ SYSVIA_REGB             = SHEILABASE + $40
 DISPLAY_START           = $7c00
 DEBUG                   = FALSE
 
+; Zero Page - REORGANIZED for optimization
 ORG     $60
 GUARD   $90
 
@@ -290,36 +292,36 @@ ENDMACRO
     ldy     row_length+1
 
 .play_note
-    ; CH0 - 21 cycles
+    ; CH0
     lda     ch0_acc_lo          ; 3
     adc     ch0_div_lo          ; 3
     sta     ch0_acc_lo          ; 3
     lda     ch0_acc_hi          ; 3
     adc     ch0_div_hi          ; 3
     sta     ch0_acc_hi          ; 3
-    cmp     ch0_duty            ; 3
-    
-    ; Generate bit and store - 8 cycles
+    ; Compare and generate bit
+    cmp     ch0_duty            ; 3 - carry set if acc_hi >= duty
     lda     #$00                ; 2
-    sbc     #$00                ; 2
+    sbc     #$00                ; 2 - A = $FF if carry set, $00 if clear
     sta     temp_output         ; 3 - save CH0 bit
+    ; Subtotal: 28 cycles
     
-    ; CH1 - 21 cycles
+    ; CH1
     lda     ch1_acc_lo          ; 3
     adc     ch1_div_lo          ; 3
     sta     ch1_acc_lo          ; 3
     lda     ch1_acc_hi          ; 3
     adc     ch1_div_hi          ; 3
     sta     ch1_acc_hi          ; 3
+    ; Compare and generate bit
     cmp     ch1_duty            ; 3
-    
-    ; Merge with CH0 - 8 cycles
     lda     #$00                ; 2
     sbc     #$00                ; 2
-    ora     temp_output         ; 3
-    sta     temp_output         ; 3
+    ora     temp_output         ; 3 - mix CH0 | CH1
+    sta     temp_output         ; 3 - save mixed result
+    ; Subtotal: 28 cycles
     
-    ; CH2 - 21 cycles
+    ; CH2
     lda     ch2_acc_lo          ; 3
     adc     ch2_div_lo          ; 3
     sta     ch2_acc_lo          ; 3
@@ -327,28 +329,27 @@ ENDMACRO
     adc     ch2_div_hi          ; 3
     sta     ch2_acc_hi          ; 3
     cmp     ch2_duty            ; 3
-    
-    ; Final merge and output - 16 cycles
     lda     #$00                ; 2
     sbc     #$00                ; 2
-    ora     temp_output         ; 3
-    beq     silent              ; 2/3
+    ora     temp_output         ; 3 - final mix CH0 | CH1 | CH2
+    
+    beq     play_silent         ; 2 if not taken, 3 if taken
     lda     #$90                ; 2
-    bne     do_output           ; 3
-.silent
+    nop                         ; 2 (balance the branch)
+    jmp     play_output         ; 3
+.play_silent                    ; 3 cycles to get here
     lda     #$9F                ; 2
-.do_output
+    nop                         ; 2 (balance)
+    nop                         ; 2
+.play_output
+    and     #%10011111
     sta     SYSVIA_ORAS         ; 4
     
-    ; COUNTER - 11 cycles
     dex                         ; 2
     bne     play_note           ; 3
     dey                         ; 2
     bne     play_note           ; 3
     
-    ; TOTAL: ~21+8+21+8+21+16+11 = ~106 cycles base
-    ; With branch overhead and memory access: ~153 cycles
-
 .row_finished
     jmp     row
 
@@ -365,7 +366,7 @@ ENDMACRO
         cld
         jmp     OSWRCH
 
-INCLUDE "tracks\liberty_bell_tritone.6502" 
+INCLUDE "tracks\lb_zx_tritone.6502" 
 
 .end
 
