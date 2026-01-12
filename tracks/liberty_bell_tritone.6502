@@ -7,7 +7,7 @@
 	equw 0
 	equw loop
 .pattern1
-	equw $0203
+	equw $0202
 	equb $91,$b1,$00,$00
 	equb $01,$88,$d8,$01
 	equb $01,$01,$01

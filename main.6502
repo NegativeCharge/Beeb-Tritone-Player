@@ -1,9 +1,9 @@
-;Tritone beeper music engine - DATA FORMAT CORRECTED
+;Tritone beeper music engine - FIXED COUNTER
 ;Original Z80 code by Shiru 03'2011, released as Public Domain
 ;1tracker version by Shiru 03'2018
 ;6502 engine port by utz 03'2024
 ;Ported to the BBC Micro by Negative Charge 03'2024
-;Fixed: Correct interpretation of data format
+;Fixed: Proper 16-bit counter with X/Y registers
 
 ; Constants
 OSBYTE                  = $FFF4
@@ -163,46 +163,33 @@ ENDMACRO
     rts
 
 .row
-    ; Z80 logic:
-    ; ld a,(hl) / inc hl / cp 2 / jr c,.ch0
-    ; If < 2, go to ch0 (values 0 or 1)
-    ; cp 128 / jr c,drumSound
-    ; If 2-127, it's a drum
-    ; cp 255 / jp z,nextPos
-    ; If 255, pattern end
-    ; Otherwise (128-254), fall through to ch0
-    
     ldy     #0
     lda     (pattern_ptr),y
-    iny                     ; Y=1 now
+    iny
     
+    ; Check for pattern end (was checking for 255, should be 0)
+    bne     not_end
+    jmp     pattern_end
+    
+.not_end
     cmp     #2
-    bcc     ch0             ; If < 2 (0 or 1), go to ch0
+    bcc     ch0
     
     cmp     #128
-    bcc     drum_cmd        ; If 2-127, it's a drum
+    bcc     drum_cmd
     
-    cmp     #255
-    beq     pattern_end     ; If 255, end pattern
-    
-    ; Otherwise 128-254, fall through to ch0 processing
-    ; This byte IS the ch0 data
-    dey                     ; Y=0 again since we haven't consumed this byte yet
+    dey
 
 .ch0
     lda     (pattern_ptr),y
-    iny                     ; Consume ch0 byte, Y now points to next
+    iny
+    
+    beq     skip_ch0        ; 0 = skip this channel (no update)
     
     cmp     #1
-    beq     skip_ch0        ; Reuse previous ch0
+    beq     ch0_rest        ; 1 = rest (silence)
     
-    bne     ch0_check_note
-    ; A = 0: clear channel
-    sta     ch0_duty:sta ch0_div_lo:sta ch0_div_hi
-    jmp     skip_ch0
-
-.ch0_check_note
-    ; A != 0 and A != 1, so it's note data
+    ; Otherwise it's a note
     tax
     and     #$0f
     sta     ch0_div_hi
@@ -214,25 +201,25 @@ ENDMACRO
     sta     ch0_div_lo
     jmp     skip_ch0
 
+.ch0_rest
+    lda     #0
+    sta     ch0_duty:sta ch0_div_lo:sta ch0_div_hi
+    jmp     skip_ch0
+
 .drum_cmd
-    ; A contains drum value (2-127)
-    ; Store it and read next byte for ch0
     sta     drum
     jmp     ch0
 
 .skip_ch0
-    ; Y points to ch1 byte
     lda     (pattern_ptr),y
     iny
     
-    cmp     #1
-    beq     skip_ch1
+    beq     skip_ch1        ; 0 = skip this channel (no update)
     
-    bne     ch1_check_note
-    sta     ch1_duty:sta ch1_div_lo:sta ch1_div_hi
-    jmp     skip_ch1
-
-.ch1_check_note
+    cmp     #1
+    beq     ch1_rest        ; 1 = rest (silence)
+    
+    ; Otherwise it's a note
     tax
     and     #$0f:sta ch1_div_hi
     txa
@@ -240,20 +227,22 @@ ENDMACRO
     lda     (pattern_ptr),y
     iny
     sta     ch1_div_lo
+    jmp     skip_ch1
+
+.ch1_rest
+    lda     #0
+    sta     ch1_duty:sta ch1_div_lo:sta ch1_div_hi
 
 .skip_ch1
-    ; Y points to ch2 byte
     lda     (pattern_ptr),y
     iny
     
-    cmp     #1
-    beq     skip_ch2
+    beq     skip_ch2        ; 0 = skip this channel (no update)
     
-    bne     ch2_check_note
-    sta     ch2_duty:sta ch2_div_lo:sta ch2_div_hi
-    jmp     skip_ch2
-
-.ch2_check_note
+    cmp     #1
+    beq     ch2_rest        ; 1 = rest (silence)
+    
+    ; Otherwise it's a note
     tax
     and     #$0f:sta ch2_div_hi
     txa
@@ -261,9 +250,13 @@ ENDMACRO
     lda     (pattern_ptr),y
     iny
     sta     ch2_div_lo
+    jmp     skip_ch2
+
+.ch2_rest
+    lda     #0
+    sta     ch2_duty:sta ch2_div_lo:sta ch2_div_hi
 
 .skip_ch2
-    ; Y now contains the number of bytes consumed
     tya
     clc
     adc     pattern_ptr+0:sta pattern_ptr+0
@@ -279,7 +272,7 @@ ENDMACRO
     ldy     row_length+1
 
 ; ===================================================================
-; INNER LOOP - Maximum speed
+; INNER LOOP - OPTIMIZED
 ; ===================================================================
 .play_note
     ; === CH0 === 
@@ -333,11 +326,15 @@ ENDMACRO
     lda     #$9F
     sta     SYSVIA_ORAS
     
-    ; === COUNTER ===
-    dex
-    bne     play_note
-    dey
-    bne     play_note
+    ; === COUNTER - FIXED! ===
+    ; X = low byte, Y = high byte
+    ; We need to decrement the 16-bit value (Y:X)
+    dex                     ; Decrement low byte
+    cpx     #$FF            ; Check if we wrapped (was 0, now $FF)
+    bne     play_note       ; If not wrapped, continue
+    dey                     ; Wrapped, so decrement high byte
+    cpy     #$FF            ; Check if high byte wrapped (was 0, now $FF)
+    bne     play_note       ; If not done, continue
 
 .row_finished
     jmp     row
