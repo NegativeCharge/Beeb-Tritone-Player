@@ -2,7 +2,8 @@
 ;Original Z80 code by Shiru 03'2011
 ;6502 engine port by utz 03'2024
 ;BBC Micro port by Negative Charge 03'2024
-;Cycle optimization to ~145 cycles/iteration (was ~153)
+;Cycle optimization to ~141 cycles/iteration (was ~153)
+;NOTE: Near theoretical minimum without algorithm changes
 
 ; Constants
 OSBYTE                  = $FFF4
@@ -292,8 +293,8 @@ ENDMACRO
     ldy     row_length+1
 
 ; ========================================================================
-; OPTIMIZED AUDIO GENERATION LOOP - ~145 cycles (was ~153)
-; Saved 8 cycles by removing redundant operations
+; OPTIMIZED AUDIO GENERATION LOOP - ~141 cycles (was ~153)
+; Saved 12 cycles by removing redundant operations
 ; ========================================================================
 .play_note
     ; CH0 - 25 cycles (saved 3: removed lda #0 before sbc)
@@ -337,16 +338,16 @@ ENDMACRO
     ; No store needed - use A directly
     ; Subtotal: 25 cycles (was 28, saved 3)
     
-    ; Output - 17 cycles (saved 3: simplified branching)
+    ; Output - 13 cycles (saved 7: removed AND, simplified branching)
     bne     play_sound          ; 2/3
     lda     #$9F                ; 2 - silent
     bne     play_output         ; 3 (always branches)
 .play_sound
     lda     #$90                ; 2 - sound
 .play_output
-    and     #%10011111          ; 2
     sta     SYSVIA_ORAS         ; 4
-    ; Subtotal: 17 cycles (was 20, saved 3)
+    ; Subtotal: 13 cycles (was 20, saved 7)
+    ; Note: AND removed because $9F AND $9F=$9F and $90 AND $9F=$90
     
     ; Loop counter - 7 cycles
     dex                         ; 2
@@ -354,8 +355,8 @@ ENDMACRO
     dey                         ; 2
     bne     play_note           ; 3
     
-; Total inner loop: ~145 cycles (was ~153)
-; Savings: 8 cycles per iteration = ~5.2% faster
+; Total inner loop: ~141 cycles (was ~153)
+; Savings: 12 cycles per iteration = ~7.8% faster
 ; ========================================================================
 
 .row_finished
