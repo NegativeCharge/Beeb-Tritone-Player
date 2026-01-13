@@ -1,7 +1,8 @@
 ;Tritone beeper music engine
 ;Original Z80 code by Shiru 03'2011
 ;6502 engine port by utz 03'2024
-;BBC Micro port by Negative Charge 03'2024
+;BBC Micro port by Negative Charge 01'2025
+;Drum implementation added
 
 ; Constants
 OSBYTE                  = $FFF4
@@ -13,7 +14,6 @@ SYSVIA_ORAS             = SHEILABASE + $4F
 SYSVIA_REGB             = SHEILABASE + $40
 
 DISPLAY_START           = $7c00
-DEBUG                   = FALSE
 
 ; Zero Page
 ORG     $60
@@ -47,14 +47,22 @@ GUARD   $90
 .drum               SKIP 1
 .row_length         SKIP 2
 
+; Drum variables
+.drum_toggle        SKIP 1  ; Output toggle value
+.drum_acc           SKIP 1  ; Accumulator
+.drum_phase         SKIP 1  ; Phase counter
+.drum_iter_lo       SKIP 1  ; Iteration counter low
+.drum_iter_hi       SKIP 1  ; Iteration counter high
+.drum_param1        SKIP 1  ; Parameter 1 from table
+.drum_param2        SKIP 1  ; Parameter 2 from table
+.drum_noise_ptr     SKIP 2  ; Noise data pointer
+
 .vars_end
 
 ORG     &1900
 GUARD   DISPLAY_START
 
 .start
-
-INCLUDE "lib\os.s.6502" 
 
 MACRO sound_write_slow
     sta     SYSVIA_ORAS
@@ -77,16 +85,6 @@ MACRO RESET_SOUND_CHIP
 ENDMACRO
 
 .init
-    ldx     #1:ldy     #22
-    jsr     moveTextCursor
-    jsr     printString
-    equs    "The Liberty Bell",0
-
-    ldx     #1:ldy     #24
-    jsr     moveTextCursor
-    jsr     printString
-    equs    "John Philip Sousa",0
-
     lda     #%11111111
     sta     SYSVIA_DDRA
 
@@ -116,20 +114,23 @@ ENDMACRO
     ldx     #HI(music_data)
 
 .play
-    pha:txa:pha
+    pha
+    txa
+    pha
     
     ; Clear ZP
     lda     #0
-    ldx     #$0F
+    ldx     #vars_end-vars_start
 .clear_loop
-    sta     $60,x
+    sta     vars_start,x
     dex
     bpl     clear_loop
     
-    pla:sta pattern_ptr+1
-    pla:sta pattern_ptr+0
+    pla
+    sta     pattern_ptr+1
+    pla
+    sta     pattern_ptr+0
 
-    ; Set loop_ptr to music_data + 2 (the loop label)
     lda     pattern_ptr+0
     clc
     adc     #2
@@ -139,24 +140,26 @@ ENDMACRO
     sta     loop_ptr+1
 
 .play_loop
-    ; Save order list position
-    lda     pattern_ptr+0:sta order_ptr+0
-    lda     pattern_ptr+1:sta order_ptr+1
-    
-    ; Read pattern pointer from order list
+    lda     pattern_ptr+0
+    sta     order_ptr+0
+    lda     pattern_ptr+1
+    sta     order_ptr+1
+
     ldy     #0
     lda     (pattern_ptr),y
     tax
     iny
     lda     (pattern_ptr),y
-    ; Check if zero (end of order list)
+    
     bne     no_loop
     cpx     #0
     bne     no_loop
     
 .return_loop
-    lda     loop_ptr+0:sta pattern_ptr+0
-    lda     loop_ptr+1:sta pattern_ptr+1
+    lda     loop_ptr+0
+    sta     pattern_ptr+0
+    lda     loop_ptr+1
+    sta     pattern_ptr+1
     jmp     play_loop
 
 .no_loop
@@ -166,20 +169,20 @@ ENDMACRO
     
     ; Read speed from pattern
     ldy     #0
-    lda     (pattern_ptr),y:sta row_length+0
+    lda     (pattern_ptr),y
+    sta     row_length+0
     iny
-    lda     (pattern_ptr),y:sta row_length+1
+    lda     (pattern_ptr),y
+    sta     row_length+1
     
-    ; Advance pattern_ptr past speed to row data
     lda     pattern_ptr+0
-    adc     #1              ; Carry set from iny
+    adc     #1
     sta     pattern_ptr+0
     bcc     row
     inc     pattern_ptr+1
     jmp     row
 
 .pattern_end
-    ; Restore and advance order pointer
     lda     order_ptr+0
     clc
     adc     #2
@@ -203,7 +206,6 @@ ENDMACRO
     cmp     #2
     bcc     ch0
     
-    ; Drum command
     sta     drum
     lda     (pattern_ptr),y
     iny
@@ -215,8 +217,9 @@ ENDMACRO
     cmp     #2
     bcs     ch0_note
     
-    ; Rest
-    sta     ch0_duty:sta ch0_div_lo:sta ch0_div_hi
+    sta     ch0_duty
+    sta     ch0_div_lo
+    sta     ch0_div_hi
     jmp     skip_ch0
 
 .ch0_note
@@ -240,14 +243,18 @@ ENDMACRO
     cmp     #2
     bcs     ch1_note
     
-    sta     ch1_duty:sta ch1_div_lo:sta ch1_div_hi
+    sta     ch1_duty
+    sta     ch1_div_lo
+    sta     ch1_div_hi
     jmp     skip_ch1
 
 .ch1_note
     tax
-    and     #$0f:sta ch1_div_hi
+    and     #$0f
+    sta     ch1_div_hi
     txa
-    and     #$f0:sta ch1_duty
+    and     #$f0
+    sta     ch1_duty
     lda     (pattern_ptr),y
     iny
     sta     ch1_div_lo
@@ -262,14 +269,18 @@ ENDMACRO
     cmp     #2
     bcs     ch2_note
     
-    sta     ch2_duty:sta ch2_div_lo:sta ch2_div_hi
+    sta     ch2_duty
+    sta     ch2_div_lo
+    sta     ch2_div_hi
     jmp     skip_ch2
 
 .ch2_note
     tax
-    and     #$0f:sta ch2_div_hi
+    and     #$0f
+    sta     ch2_div_hi
     txa
-    and     #$f0:sta ch2_duty
+    and     #$f0
+    sta     ch2_duty
     lda     (pattern_ptr),y
     iny
     sta     ch2_div_lo
@@ -279,8 +290,165 @@ ENDMACRO
     clc
     adc     pattern_ptr+0
     sta     pattern_ptr+0
-    bcc     setup_play_loop
+    bcc     check_drum
     inc     pattern_ptr+1
+
+.check_drum
+    lda     drum
+    bne     play_drum
+    jmp     setup_play_loop
+    
+.play_drum
+    ; Drum index in A (values 2-25 from pattern for drums 0-23)
+    ; Multiply by 2
+    asl     a
+    ; Compare with 14*2 to determine tone vs noise
+    cmp     #28
+    bcs     drum_noise
+    
+.drum_tone
+    ; Calculate offset: (drum*2) - 4 = (drum-2)*2
+    sec
+    sbc     #4
+    tax
+    
+    ; Load parameters
+    lda     drum_settings,x
+    sta     drum_param1
+    lda     drum_settings+1,x
+    sta     drum_param2
+    
+    ; Initialize for 512 iterations (2 * 256)
+    lda     #2
+    sta     drum_iter_hi
+    lda     #0
+    sta     drum_iter_lo
+    sta     drum_toggle
+    sta     drum_acc
+    lda     #1
+    sta     drum_phase
+    
+.drum_tone_loop
+    ; Check if iteration counter is odd (like Z80 "bit 0,b")
+    lda     drum_iter_lo
+    and     #1
+    beq     drum_tone_no_update
+    
+    ; Update phase counter (like Z80 "dec e")
+    dec     drum_phase
+    bne     drum_tone_no_update
+    
+    ; Reload phase from param1 (like Z80 "ld e,l")
+    lda     drum_param1
+    sta     drum_phase
+    
+    ; Update accumulator (like Z80 "add a,(ix+1); ld l,a")
+    lda     drum_acc
+    clc
+    adc     drum_param2
+    sta     drum_acc
+    
+    ; Toggle output (like Z80 "xor d")
+    lda     drum_toggle
+    eor     #$10
+    sta     drum_toggle
+    
+.drum_tone_no_update
+    ; Output (like Z80 "out (#fe),a")
+    lda     drum_toggle
+    bne     drum_tone_sound
+    lda     #$9F
+    bne     drum_tone_write
+.drum_tone_sound
+    lda     #$90
+.drum_tone_write
+    sta     SYSVIA_ORAS
+    
+    ; Decrement iteration counter
+    dec     drum_iter_lo
+    bne     drum_tone_loop
+    dec     drum_iter_hi
+    bne     drum_tone_loop
+    
+    ; Clear drum flag
+    lda     #0
+    sta     drum
+    jmp     setup_play_loop
+    
+.drum_noise
+    ; Calculate offset: (drum*2) - 4
+    sec
+    sbc     #4
+    tax
+    
+    ; Load parameters
+    lda     drum_settings,x
+    sta     drum_param1
+    lda     drum_settings+1,x
+    sta     drum_param2
+    
+    ; Initialize noise pointer to start of noise data
+    lda     #LO(drum_noise_data)
+    sta     drum_noise_ptr+0
+    lda     #HI(drum_noise_data)
+    sta     drum_noise_ptr+1
+    
+    ; Initialize for 256 iterations
+    lda     #0
+    sta     drum_iter_lo
+    lda     #1
+    sta     drum_phase
+    
+.drum_noise_loop
+    ; Get pseudo-random byte from memory (like Z80 "ld a,(hl)")
+    ldy     #0
+    lda     (drum_noise_ptr),y
+    
+    ; First output: noise & #10 (like Z80 "and d; out (#fe),a")
+    and     #$10
+    bne     drum_noise_out1
+    lda     #$9F
+    bne     drum_noise_write1
+.drum_noise_out1
+    lda     #$90
+.drum_noise_write1
+    sta     SYSVIA_ORAS
+    
+    ; Second output: previous result & param1 (like Z80 "and (ix); out (#fe),a")
+    ldy     #0
+    lda     (drum_noise_ptr),y
+    and     #$10
+    beq     drum_noise_silent
+    lda     #$FF
+.drum_noise_silent
+    and     drum_param1
+    bne     drum_noise_out2
+    lda     #$9F
+    bne     drum_noise_write2
+.drum_noise_out2
+    lda     #$90
+.drum_noise_write2
+    sta     SYSVIA_ORAS
+    
+    ; Decrement phase (like Z80 "dec e")
+    dec     drum_phase
+    bne     drum_noise_continue
+    
+    ; Reload phase and advance pointer (like Z80 "ld e,(ix+1); inc hl")
+    lda     drum_param2
+    sta     drum_phase
+    inc     drum_noise_ptr+0
+    bne     drum_noise_continue
+    inc     drum_noise_ptr+1
+    
+.drum_noise_continue
+    ; Decrement iteration counter (like Z80 "djnz")
+    dec     drum_iter_lo
+    bne     drum_noise_loop
+    
+    ; Clear drum flag
+    lda     #0
+    sta     drum
 
 .setup_play_loop
     lda     row_length+0
@@ -291,19 +459,19 @@ ENDMACRO
     ldy     row_length+1
 
 .play_note
-    ; CH0
+    ; CH0 - 28 cycles
     lda     ch0_acc_lo          ; 3
     adc     ch0_div_lo          ; 3
     sta     ch0_acc_lo          ; 3
     lda     ch0_acc_hi          ; 3
     adc     ch0_div_hi          ; 3
     sta     ch0_acc_hi          ; 3
-    cmp     ch0_duty            ; 3 - carry set if acc_hi >= duty
+    cmp     ch0_duty            ; 3
     lda     #$00                ; 2
-    sbc     #$00                ; 2 - A = $00 if carry, $FF if !carry
+    sbc     #$00                ; 2
     sta     temp_output         ; 3
     
-    ; CH1
+    ; CH1 - 31 cycles
     lda     ch1_acc_lo          ; 3
     adc     ch1_div_lo          ; 3
     sta     ch1_acc_lo          ; 3
@@ -313,10 +481,10 @@ ENDMACRO
     cmp     ch1_duty            ; 3
     lda     #$00                ; 2
     sbc     #$00                ; 2
-    ora     temp_output         ; 3 - mix CH0 | CH1
+    ora     temp_output         ; 3
     sta     temp_output         ; 3
     
-    ; CH2
+    ; CH2 - 28 cycles
     lda     ch2_acc_lo          ; 3
     adc     ch2_div_lo          ; 3
     sta     ch2_acc_lo          ; 3
@@ -326,37 +494,68 @@ ENDMACRO
     cmp     ch2_duty            ; 3
     lda     #$00                ; 2
     sbc     #$00                ; 2
-    ora     temp_output         ; 3 - final mix (A = CH0 | CH1 | CH2)
+    ora     temp_output         ; 3
     
-    bne     play_sound          ; 2/3
-    lda     #$9F                ; 2 - silent
-    bne     play_output         ; 3 (always branches)
-.play_sound
-    lda     #$90                ; 2 - sound
-.play_output
+    ; Output decision - 11 cycles (both paths balanced)
+    beq     play_silent         ; 3 (taken) / 2 (not taken)
+    lda     #$90                ; 2
+    bne     play_write          ; 3 (always taken)
+.play_silent
+    lda     #$9F                ; 2
+    nop                         ; 2 (balance with bne above)
+.play_write
     sta     SYSVIA_ORAS         ; 4
+    
+    ; Loop control - 5 cycles (typical)
     dex                         ; 2
-    bne     play_note           ; 3
+    bne     play_note           ; 3 (taken) / 2 (not taken)
     dey                         ; 2
-    bne     play_note           ; 3
+    bne     play_note           ; 3 (taken) / 2 (not taken)
+    ; Total: 28+31+28+11+5 = 103 cycles per iteration
     
 .row_finished
     jmp     row
 
-.s_print_hex
-        pha
-        lsr a:lsr a:lsr a:lsr a
-        jsr     printNybble
-        pla
-        and     #&0f
-.printNybble
-        sed:clc
-        adc     #&90
-        adc     #&40
-        cld
-        jmp     OSWRCH
+; Drum settings table (matching Z80 version exactly)
+; Format: param1, param2 for each of 24 drum types
+.drum_settings
+    EQUB $01,$01  ; 0: tone, highest
+    EQUB $01,$02  ; 1
+    EQUB $01,$04  ; 2
+    EQUB $01,$08  ; 3
+    EQUB $01,$20  ; 4
+    EQUB $20,$04  ; 5
+    EQUB $40,$04  ; 6
+    EQUB $40,$08  ; 7: lowest
+    EQUB $04,$80  ; 8: special
+    EQUB $08,$80  ; 9
+    EQUB $10,$80  ; 10
+    EQUB $10,$02  ; 11
+    EQUB $20,$02  ; 12
+    EQUB $40,$02  ; 13
+    EQUB $16,$01  ; 14: noise, highest
+    EQUB $16,$02  ; 15
+    EQUB $16,$04  ; 16
+    EQUB $16,$08  ; 17
+    EQUB $16,$10  ; 18
+    EQUB $00,$01  ; 19
+    EQUB $00,$02  ; 20
+    EQUB $00,$04  ; 21
+    EQUB $00,$08  ; 22
+    EQUB $00,$10  ; 23
 
-INCLUDE "tracks\lb_zx_tritone.6502" 
+; Pseudo-random noise data source (like Z80 using HL as memory pointer)
+.drum_noise_data
+    EQUB $A3,$7F,$2E,$91,$C4,$5B,$D8,$06
+    EQUB $F1,$39,$8C,$E2,$47,$BD,$19,$74
+    EQUB $AA,$0F,$63,$D5,$28,$9E,$41,$B7
+    EQUB $FC,$35,$8A,$DE,$52,$C9,$14,$6B
+    EQUB $E8,$23,$9D,$41,$B6,$0C,$F7,$3A
+    EQUB $88,$D4,$51,$BE,$12,$E7,$3C,$90
+    EQUB $C5,$1A,$6F,$A4,$D9,$27,$8B,$FE
+    EQUB $53,$B8,$0E,$C1,$76,$2D,$92,$E5
+
+INCLUDE "tracks\lb_bbc_tritone.6502" 
 
 .end
 
